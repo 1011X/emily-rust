@@ -1,0 +1,56 @@
+/* Loads a program and runs it, based on contents of Options. */
+
+mod options;
+mod tokenize;
+mod token;
+mod loader;
+mod pretty;
+mod repl;
+
+use std::process::exit;
+use std::io::stderr;
+
+use options::ExecutionTarget;
+use token::CodeSource;
+use loader::LoadLocation;
+
+fn main() {
+    fn process_one(target: ExecutionTarget) {
+        let buf = match target {
+            ExecutionTarget::File (f) => tokenize::tokenize_channel(CodeSource::File(f), open_in(f)),
+            ExecutionTarget::Stdin => tokenize::tokenize_channel(CodeSource::Stdin, stdin),
+            ExecutionTarget::Literal (s) => tokenize::tokenize_string(CodeSource::Cmdline, s)
+        };
+        let location = match target {
+            ExecutionTarget::File (f) => loader::location_around(f),
+            _ => LoadLocation::Cwd
+        };
+        /*  */
+        unsafe {
+		    if options::run.disassemble {
+		    	println!(pretty::dump_code_tree_terse(buf));
+		    }
+		    else if options::run.disassemble_verbose {
+		    	println!(pretty::dump_code_tree_dense(buf));
+		    }
+		    else {
+		    	loader::execute_program_from(location, buf);
+		    }
+		}
+    }
+    if options::run.repl { repl::repl(options::run.targets) }
+    else {
+    	for target in options::run.targets {
+    		let result = process_one(target);
+    	}
+        with
+            token::CompilationError (e) => {
+                write!(stderr(), "{}", token::error_string(e));
+                exit(1);
+            },
+            Failure (e) => {
+                write!(stderr(), "{}", e);
+                exit(1);
+            }
+    }
+}

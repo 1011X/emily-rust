@@ -1,0 +1,32 @@
+/* Populates a prototype for nulls, also holds machinery used by other Builtin files */
+
+mod value_util;
+mod value;
+
+use value::{
+	TableValue,
+	Value
+}
+
+static mut null_prototype_table : TableValue = value_util::table_blank(Value::NoSet);
+
+/* Returns setAtomValue,setAtomFn,setAtomMethod */
+fn atom_funcs<F>(table: TableValue) -> (&F, &F, &F)
+	where F: Fn(String, Value) {
+    fn set_value(name: String, v: Value) {
+    	table.insert(Value::AtomValue(name), v);
+    }
+    
+    (
+		set_value,
+		|n, fn| set_value(n, Value::BuiltinFunctionValue(fn)),
+		|n, fn| set_value(n, Value::BuiltinMethodValue(fn))
+    )
+}
+
+/* FIXME: Making these *object methods* is a pretty bad approach and does not allow for expression short-circuiting */
+pub fn init() {
+    let (_, setAtomFn, _) = atomFuncs nullPrototypeTable in
+
+    setAtomFn "eq"  (fun v -> ValueUtil.boolCast (match v with Value.Null -> true | _ -> false ));
+}
