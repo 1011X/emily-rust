@@ -1,10 +1,10 @@
 /* Data representation for an AST. */
 
-use TokenContents::*;
 use CodeSource::*;
 use TokenFailureKind::*;
 
 /* Records the original source file of a token */
+#[derive(Clone)]
 pub enum CodeSource {
 	Stdin,
 	Cmdline,
@@ -14,6 +14,7 @@ pub enum CodeSource {
 }
 
 /* Records the original source position of a token */
+#[derive(Clone)]
 pub struct CodePosition {
 	file_name : CodeSource,
 	line_number : isize,
@@ -26,8 +27,8 @@ pub fn file_name_string(n: &CodeSource) -> String {
 		Stdin => "<input>".to_string(),
 		Cmdline => "<commandline>".to_string(),
 		Unknown => "<unknown>".to_string(),
-		Internal(s) => format!("<internal:{}>", s),
-		File(s) => format!("'{}'", s)
+		Internal(ref s) => format!("<internal:{}>", s),
+		File(ref s) => format!("'{}'", s)
 	}
 }
 
@@ -37,12 +38,14 @@ pub fn position_string(p: &CodePosition) -> String {
 }
 
 /* If the group is boxed, what is returned from it? */
+#[derive(Clone)]
 pub enum BoxKind {
 	NewObject,
 	NewScope
 }
 
 /* What are the rules for descending into this group? */
+#[derive(Clone)]
 pub enum TokenGroupKind {
 	Plain,               /* Parenthesis */
 	Scoped,              /* Create a new scope within this group */
@@ -50,6 +53,7 @@ pub enum TokenGroupKind {
 }
 
 /* Is this group a closure? What kind? */
+#[derive(Clone)]
 pub enum TokenClosureKind {
 	NonClosure,                              /* Is not a function */
 	ClosureWithBinding(Vec<(bool, String)>)  /* Function with argument-- arg is return?,args */
@@ -61,6 +65,7 @@ pub enum TokenClosureKind {
 pub type CodeSequence = Vec<Vec<Token>>;
 
 /* Data content of a token */
+#[derive(Clone)]
 pub enum TokenContents {
 	Word(String),   /* Alphanum */
 	Symbol(String), /* Punctuation-- appears pre-macro only. */
@@ -78,6 +83,7 @@ pub enum TokenContents {
 }
 
 /* A token. Effectively, an AST node. */
+#[derive(Clone)]
 pub struct Token {
 	at : CodePosition,
 	contents : TokenContents
@@ -86,25 +92,32 @@ pub struct Token {
 impl Token {
 	/* Quick constructor for Token */
 	// XXX: make_token
-	pub fn new(position: CodePosition, contents: TokenContents) -> Token {
+	pub fn new(position: &CodePosition, contents: &TokenContents) -> Token {
 		Token {
-			at : position,
-			contents : contents
+			at : position.clone(),
+			contents : contents.clone()
 		}
 	}
 	
 	/* Quick constructor for Token, group type */
 	// XXX: make_group
-	pub fn from_group(position: CodePosition, closure: TokenClosureKind, kind: TokenGroupKind, items: CodeSequence) -> Token {
-		Self::new(position, Group(TokenGroup { kind: kind, closure: closure, items: items }))
+	pub fn from_group(position: &CodePosition, closure: &TokenClosureKind, kind: &TokenGroupKind, items: &CodeSequence) -> Token {
+		Token {
+			at: position.clone(),
+			contents: TokenContents::Group {
+				kind: kind.clone(),
+				closure: closure.clone(),
+				items: items.clone() 
+			}
+		}
 	}
 	
-	pub fn clone(&self, contents: TokenContents) -> Token {
-		Self::new(self.at, contents)
+	pub fn clone(&self, contents: &TokenContents) -> Token {
+		Self::new(&self.at, contents)
 	}
 	
-	pub fn clone_group(&self, closure: TokenClosureKind, kind: TokenGroupKind, items: CodeSequence) -> Token {
-		Self::from_group(self.at, closure, kind, items)
+	pub fn clone_group(&self, closure: &TokenClosureKind, kind: &TokenGroupKind, items: &CodeSequence) -> Token {
+		Self::from_group(&self.at, closure, kind, items)
 	}
 }
 
@@ -114,22 +127,20 @@ pub enum TokenFailureKind {
 	MacroError
 }
 
-/* Quarantined
 pub struct CompilationError(TokenFailureKind, CodePosition, String);
 
-pub fn incomplete_at(at: CodePosition, mesg: String) -> Result<(), CompilationError> {
-	Err(CompilationError(IncompleteError, mesg, position_string(at)));
+pub fn incomplete_at(at: &CodePosition, mesg: String) -> Result<(), CompilationError> {
+	Err(CompilationError(IncompleteError, at.clone(), mesg))
 }
 
-pub fn fail_at(at: CodePosition, mesg: String) -> Result<(), CompilationError> {
-	Err(CompilationError(InvalidError, mesg, position_string(at)));
+pub fn fail_at(at: &CodePosition, mesg: String) -> Result<(), CompilationError> {
+	Err(CompilationError(InvalidError, at.clone(), mesg))
 }
 
-pub fn fail_token(at: Token, mesg: String) -> Result<(), CompilationError>> {
-	fail_at(at.at, mesg)
+pub fn fail_token(at: &Token, mesg: String) -> Result<(), CompilationError> {
+	fail_at(&at.at, mesg)
 }
 
-pub fn error_string<T>(_: T, at: CodePosition, mesg: String) -> String {
-	format!("Fatal error: {} {}", mesg, position_string(at))
+pub fn error_string(CompilationError(_, at, mesg): CompilationError) -> String {
+	format!("Fatal error: {} {}", mesg, position_string(&at))
 }
-*/
