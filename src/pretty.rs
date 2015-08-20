@@ -9,13 +9,11 @@ use std::cmp::Ordering;
 use token::{
 	TableValue,
 	TokenContents,
-	TokenGroup,
 	TokenGroupKind
 }
 
 use value::{
 	Value,
-	ClosureValue,
 	ClosureExec
 }
 
@@ -30,7 +28,7 @@ fn dump_code_tree_general<F>(group_printer: F, token: &Token) -> String
 		TokenContents::String(x) => format!("\"{}\"", x),
 		TokenContents::Atom(x) => format!(".{}", x),
 		TokenContents::Number(x) => x.to_string(),
-		TokenContents::Group(TokenGroup {kind: kind, closure: closure, items: items}) => {
+		TokenContents::Group {kind: kind, closure: closure, items: items} => {
 		    let (mut l, r) = match kind {
 		        TokenGroupKind::Plain => ("(".to_string(), ")".to_string()),
 		        TokenGroupKind::Scoped => ("{".to_string(), "}".to_string()),
@@ -137,7 +135,7 @@ fn dump_value_tree_general<F>(wrapper: F, v: &Value) -> String
         Value::BuiltinFunctionValue (_) => "<builtin>".to_string(),
         Value::BuiltinMethodValue (_) => "<object-builtin>".to_string(),
         Value::BuiltinUnaryMethodValue (_) => "<property-builtin>".to_string(),
-        Value::ClosureValue (ClosureValue {exec:e, needArgs:n}) => {
+        Value::ClosureValue {exec:e, needArgs:n} => {
             let tag = match e {
             	ClosureExec::ClosureExecUser (_) => "closure",
             	ClosureExec::ClosureExecBuiltin (_) => "closure-builtin"
