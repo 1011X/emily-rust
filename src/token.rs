@@ -1,16 +1,13 @@
 /* Data representation for an AST. */
 
-use CodeSource::*;
-use TokenFailureKind::*;
-
 /* Records the original source file of a token */
 #[derive(Clone)]
 pub enum CodeSource {
 	Stdin,
 	Cmdline,
 	Unknown,
-	Internal(String),
-	File(String)
+	Internal (String),
+	File (String)
 }
 
 /* Records the original source position of a token */
@@ -24,11 +21,11 @@ pub struct CodePosition {
 /* Make CodePosition.file_name human-readable */
 pub fn file_name_string(n: &CodeSource) -> String {
 	match *n {
-		Stdin => "<input>".to_string(),
-		Cmdline => "<commandline>".to_string(),
-		Unknown => "<unknown>".to_string(),
-		Internal(ref s) => format!("<internal:{}>", s),
-		File(ref s) => format!("'{}'", s)
+		CodeSource::Stdin => "<input>".to_string(),
+		CodeSource::Cmdline => "<commandline>".to_string(),
+		CodeSource::Unknown => "<unknown>".to_string(),
+		CodeSource::Internal (ref s) => format!("<internal:{}>", s),
+		CodeSource::File (ref s) => format!("'{}'", s)
 	}
 }
 
@@ -38,25 +35,22 @@ pub fn position_string(p: &CodePosition) -> String {
 }
 
 /* If the group is boxed, what is returned from it? */
-#[derive(Clone)]
-pub enum BoxKind {
-	NewObject,
-	NewScope
-}
+#[derive(Clone, Copy)]
+pub enum BoxKind { NewObject, NewScope }
 
 /* What are the rules for descending into this group? */
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub enum TokenGroupKind {
 	Plain,               /* Parenthesis */
 	Scoped,              /* Create a new scope within this group */
-	Box(BoxKind)         /* Create a new object */
+	Box (BoxKind)         /* Create a new object */
 }
 
 /* Is this group a closure? What kind? */
 #[derive(Clone)]
 pub enum TokenClosureKind {
 	NonClosure,                              /* Is not a function */
-	ClosureWithBinding(Vec<(bool, String)>)  /* Function with argument-- arg is return?,args */
+	ClosureWithBinding (Vec<(bool, String)>)  /* Function with argument-- arg is return?,args */
 }
 
 /* Representation of a tokenized code blob. */
@@ -67,18 +61,19 @@ pub type CodeSequence = Vec<Vec<Token>>;
 /* Data content of a token */
 #[derive(Clone)]
 pub enum TokenContents {
-	Word(String),   /* Alphanum */
-	Symbol(String), /* Punctuation-- appears pre-macro only. */
-	String(String), /* "Quoted" */
-	Atom(String),   /* Ideally appears post-macro only */
-	Number(f64),
+	Word (String),   /* Alphanum */
+	Symbol (String), /* Punctuation-- appears pre-macro only. */
+	String (String), /* "Quoted" */
+	Atom (String),   /* Ideally appears post-macro only */
+	Number (f64),
 	
 	/* Data content of a group-type token */
 	// XXX: TokenGroup
 	Group {
-		kind : TokenGroupKind,       /* Group kind */
+		kind : TokenGroupKind,      /* Group kind */
 		closure : TokenClosureKind,  /* Closure kind, if any */
-		items : CodeSequence         /* Group is a list of lines, lines are a list of tokens */
+		group_initializer : Vec<Token>,    /* Used to create scope */
+		items : CodeSequence /* Group is a list of lines, lines are a list of tokens */
 	}
 }
 
@@ -89,8 +84,35 @@ pub struct Token {
 	contents : TokenContents
 }
 
+/* Quick constructor for token */
+pub fn make_token(position: &CodePosition, contents: &TokenContents) -> Token {
+	Token {
+		at: position.clone(),
+		contents: contents.clone()
+	}
+}
+
+/* Quick constructor for token, group type */
+pub fn make_group(position: &CodePosition, closure: &TokenClosureKind, kind: &TokenGroupKind, group_initializer: &Vec<Token>, items: &CodeSequence) -> Token {
+    make_token(position, &TokenContents::Group {
+    	kind: kind.clone(),
+    	closure: closure.clone(),
+    	group_initializer: group_initializer.clone(),
+    	items: items.clone()
+    })
+}
+
+pub fn clone(token: &Token, contents: &TokenContents) -> Token {
+	make_token(&token.at, contents)
+}
+
+pub fn clone_group(token: &Token, closure: &TokenClosureKind, kind: &TokenGroupKind, initializer: &Vec<Token>, items: &CodeSequence) -> Token {
+	make_group(&token.at, closure, kind, initializer, items)
+}
+
+/* Focus on getting stuff working first, then worry about Rust-ing it
 impl Token {
-	/* Quick constructor for Token */
+	// Quick constructor for Token
 	// XXX: make_token
 	pub fn new(position: &CodePosition, contents: &TokenContents) -> Token {
 		Token {
@@ -99,7 +121,7 @@ impl Token {
 		}
 	}
 	
-	/* Quick constructor for Token, group type */
+	// Quick constructor for Token, group type
 	// XXX: make_group
 	pub fn from_group(position: &CodePosition, closure: &TokenClosureKind, kind: &TokenGroupKind, items: &CodeSequence) -> Token {
 		Token {
@@ -120,6 +142,7 @@ impl Token {
 		Self::from_group(&self.at, closure, kind, items)
 	}
 }
+*/
 
 pub enum TokenFailureKind {
 	IncompleteError,
@@ -127,20 +150,20 @@ pub enum TokenFailureKind {
 	MacroError
 }
 
-pub struct CompilationError(TokenFailureKind, CodePosition, String);
+pub struct CompilationError (TokenFailureKind, CodePosition, String);
 
 pub fn incomplete_at(at: &CodePosition, mesg: String) -> Result<(), CompilationError> {
-	Err(CompilationError(IncompleteError, at.clone(), mesg))
+	Err (CompilationError (TokenFailureKind::IncompleteError, at.clone(), mesg))
 }
 
 pub fn fail_at(at: &CodePosition, mesg: String) -> Result<(), CompilationError> {
-	Err(CompilationError(InvalidError, at.clone(), mesg))
+	Err (CompilationError (TokenFailureKind::InvalidError, at.clone(), mesg))
 }
 
 pub fn fail_token(at: &Token, mesg: String) -> Result<(), CompilationError> {
 	fail_at(&at.at, mesg)
 }
 
-pub fn error_string(CompilationError(_, at, mesg): CompilationError) -> String {
-	format!("Fatal error: {} {}", mesg, position_string(&at))
+pub fn error_string(CompilationError (_, ref at, ref mesg): CompilationError) -> String {
+	format!("Fatal error: {} {}", mesg, position_string(at))
 }

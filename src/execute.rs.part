@@ -1,0 +1,491 @@
+/* Functions to execute a codeSequence */
+
+/* The general approach to evaluate a group is: For each line:
+    1. If the line is empty, skip it.
+    2. Take the first token, remove it from the line, evaluate it, call that Value 1.
+    3. If there are no more tokens in the line, the remaining Value 1 is the value of the line.
+    4. Take the next remaining token, remove it from the line, evaluate it, call that Value 2.
+    5. Apply Value 1 to Value 2, make the result the new Value 1. Goto 2.
+    The value of the final nonempty line is the value returned from evaluating the group.
+    Steps 2, 4 and 5 could potentially require code invocation, necessitating the stack.
+ */
+
+/* -- DEBUG / PRETTYPRINT HELPERS -- */
+
+/* Pretty print for registerState. Can't go in Pretty.ml because module recursion. */
+pub fn dumpRegisterState(registerState) -> String {
+    match registerState {
+		RegisterState::LineStart (v, _) =>
+			format!("LineStart:{}", pretty::dump_value(v)),
+		RegisterState::FirstValue (v, _, _) =>
+			format!("FirstValue:{}", pretty::dump_value(v)),
+		RegisterState::PairValue (v1, v2, _, _) =>
+			format!("PairValue:{},{}", pretty::dump_value(v1), pretty::dump_value(v2)),
+	}
+}
+
+/* FIXME: I wonder if there's a existing function for this in List or something. */
+pub fn stackDepth(stack) -> usize {
+	stack.len()
+}
+
+/* -- PRACTICAL HELPERS -- */
+
+type AnchoredValue = (Value, CodePosition);
+
+/* These three could technically move into value.ml but BuiltinObject depends on Value */
+pub fn scopeInheriting(kind, scopeParent) -> Value {
+    Value::Table(value_util::tableInheriting(kind, scopeParent))
+}
+
+pub fn objectLiteralScope(obj, scopeParent) -> Value {
+    /* Should this be objectValue or tableValue, and *why*? */
+    Value::Table(value_util::boxBlank obj scopeParent)
+}
+
+/* Given a parent scope and a token creates an appropriate inner group scope */
+pub fn groupScope(context: ExecuteContext, tokenKind: TokenGroupKind, scope, initializerValue: Option<>) -> {
+    match tokenKind {
+        TokenGroupKind::Plain => match initializerValue {
+        	None => scope,
+        	Some (x) => x
+        },
+        TokenGroupKind::Scoped => scopeInheriting(
+        	TableBlankKind::WithLet,
+            match initializerValue {
+            	None => scope,
+            	Some (x) => x
+            }
+        ),
+        TokenGroupKind::Box (kind) => objectLiteralScope(
+            value_util::PopulatingObject (match initializerValue {
+            	None => value_util::objectBlank(Some (context.object_proto)),
+            	Some (x) => x
+            }),
+            scope
+        )
+    }
+}
+
+/* Combine a value with an existing register var to make a new register var. */
+/* Flattens pairs, on the assumption if a pair is present we're returning their applied value, */
+/* so only call if we know this is not a pair already (unless we *want* to flatten) */
+pub fn newStateFor(register, av) -> RegisterState {
+	match (register, av) {
+    	/* Either throw out a stale LineStart / PairValue and simply take the new value, */
+		RegisterState::LineStart ((_, rat), (v, at)) |
+		RegisterState::PairValue ((_, _, rat, _), (v, at)) =>
+			RegisterState::FirstValue (v, rat, at),
+		/* Or combine with an existing value to make a pair. */
+		RegisterState::FirstValue ((v, rat, _), (v2, at)) =>
+			RegisterState::PairValue (v, v2, rat, at)
+	}
+}
+
+/* Constructor for a new frame */
+pub fn startRegister(at) -> RegisterState {
+	RegisterState::LineStart(Value::Null, at)
+}
+pub fn stackFrame(scope, code, at) -> ExecuteFrame {
+	ExecuteFrame {
+		register: startRegister(at),
+		code: code,
+		scope: scope
+	}
+}
+
+/* Only call if it really is impossible, since this gives no debug feedback */
+/* Mostly I call this if a nested match has to implement a case already excluded */
+pub fn internalFail() -> Result<(), &'static str> {
+	Err ("Internal consistency error: Reached impossible place")
+}
+
+pub fn failWithStack(stack, mesg) -> Result <(), String> {
+    Err (format!("{}\n{}", mesg, value_util::stackString(stack)))
+}
+
+/* -- INTERPRETER MAIN LOOP -- */
+
+/* ---- Structure notes:
+
+The interpreter is a tree of mutually recursive functions:
+
+executeStep: ("Proceed")
+    | EXIT (Rare-- when entire program is empty)
+    \ executeStepWithFrames: ("Evaluate first frame in stack")
+        | apply (When register contains pair)
+        \ evaluateToken: (When no pair, and we should check next token)
+            | returnTo (When no token lines)
+            \ evaluateTokenFromLines: ("Check first line of code after instruction pointer")
+                | executeStep (When first line is empty)
+                \ evaluateTokenFromTokens: ("Check first token in first line")
+                    | apply (when evaluating word)
+                    \ executeStep (when token evaluated and stack frame is adjusted with new register and/or new additional frame.)
+
+returnTo: (A value has been calculated and a new stack top decided on; fit that value into the stack top's register.)
+    | EXIT (when return from final frame)
+    \ executeStep (to proceed with new register)
+
+apply: (A pair of values has been identified; evaluate their application.)
+    | returnTo (when application result can be calculated immediately)
+    \ executeStep (when a closure or snippet requires a new frame)
+
+*/
+
+/* ---- Tail-call optimization notes:
+    These are the recursion points for executeStep:
+        evaluateTokenFromLines -> Line is present, but empty -> move to next
+        returnTo -> top frame exists, a value was calculated by an outer frame, combine down onto it
+        evaluateTokenFromTokens.simpleValue -> new value for this current frame known, just set it
+        evaluateTokenFromTokens -> DESCENT: next token is a group; evaluate it.
+        apply -> DESCENT: application is closure to value; make stack frame.
+        apply -> DESCENT: application is hasValue or setValue; do in lower stack frame.
+    In future, it might be useful to do the TCO stack rewriting at the descent points and
+    blank-line removal at tokenize time, instead of wasting time on it each loop start.
+*/
+
+/* These first five functions are mostly routing: */
+/* executeStep is the "start of the loop"-- the entry point we return to after each action.
+   it currently just unpacks the stack, cleans it up, and passes components on to process. */
+pub fn executeStep(context, stack: ExecuteStack) -> Value {
+    match &*stack {
+        /* Unusual edge case: Asked to execute an empty file -- just return */
+        [] => Value::Null,
+
+        /* Here some tail call optimization passes occur. We check for special stack patterns
+           implying unnecessary space on the stack, then rewrite the stack to avoid them. */
+
+        /* Case #1: Remove blank lines so they don't mess up other TCO checks later */
+        [moreFrames.., ExecuteFrame {ref code, ..}]
+        if code.len() >= 2 && code[1].is_empty() => {
+        	code.remove(1);
+            executeStep(context, stack)
+        },
+
+        /* Case #2: A normal group descent, but into an unnecessary pair of parenthesis.
+           IOW, the next-to-top frame does no work; its code only ever contained a group token. */
+        [moreFrames.., ExecuteFrame {register: RegisterState::LineStart (..), ref code, ..}, frame]
+        if code.len() == 1 && code[0].is_empty() => {
+        	stack.remove(stack.len() - 2);
+            executeStep(context, stack)
+        },
+
+        /* Case #3: Canonical tail call: A function application, at the end of a group.
+           We can thus excise the frame that's just waiting for the application to return. */
+        [moreFrames.., ExecuteFrame {register: RegisterState::PairValue (..), ref code, ..}, frame]
+        if code.len() == 1 && code[0].is_empty() => {
+        	stack.remove(stack.len() - 2);
+            executeStep(context, stack)
+        },
+
+        /* Case #4: Applying a continuation: We can ditch all other context. */
+        [
+        	moreFrames..,
+        	frame @ ExecuteFrame {
+		    	register: RegisterState::FirstValue (Value::Continuation (continueStack, at), ..),
+		        ref code,
+		        ..
+		    }
+		]
+		if !code.is_empty() && !code[0].is_empty() => { /* "Match a nonempty two-dimensional list" */
+        	continueStack.push(ExecuteFrame {
+        		register: RegisterState::LineStart(Value::Null, at),
+        		..frame
+        	});
+            executeStep(context, continueStack)
+        },
+
+        /* Break stack frames into first and rest */
+        [moreFrames.., frame] =>
+            executeStepWithFrames(context, stack, frame, moreFrames)
+    }
+}
+
+pub fn executeStepWithFrames(context, stack, frame, moreFrames) -> {
+    /* Trace here ONLY if command line option requests it */
+    if options::run.trace {
+    	println!("    Step | Depth {}{} | State {} | Code {}",
+			stackDepth(stack).to_string(),
+			if options::run.track_objects {
+				format!(" | Scope {}", pretty::dump_value(frame.scope))
+			} else {
+				"".to_string()
+			},
+			dumpRegisterState(frame.register),
+			pretty::dumpCodeTreeTerse(
+				token::make_group(
+					Token {
+						file_name: CodeSource::Unknown,
+						line_number: 0,
+						line_offset: 0
+					},
+					TokenClosureKind::NonClosure,
+					TokenGroupKind::Plain,
+					vec![],
+					frame.code
+				)
+			)
+		);
+	}
+
+    /* Check the state of the top frame */
+    match frame.register {
+        /* It has two values-- apply before we do anything else */
+        RegisterState::PairValue (a, b, rat, bat) =>
+            apply(context, stack, a, a, (b, bat)),
+
+        /* Either no values or just one values, so let's look at the tokens */
+        RegisterState::FirstValue (..) |
+        RegisterState::LineStart (..) =>
+            evaluateToken(context, stack, frame, moreFrames),
+            /* Pop current frame from the stack, integrate the result into the last frame and recurse (TODO) */
+    }
+}
+
+pub fn evaluateToken(context, stack, frame, moreFrames) -> {
+    /* Look at code sequence in frame */
+    match frame.code {
+        /* It's empty. We have reached the end of the group. */
+        [] => {
+        	let avalue = match frame.register { /* Unpack Value 1 from register */
+                RegisterState::LineStart (v, rat) |
+                RegisterState::FirstValue (v, rat, _) => (v, rat)
+                _ => internalFail() /* If PairValue, should have branched off above */
+            };
+            /* "Return from frame" and recurse */
+            returnTo(context, moreFrames, avalue)
+        },
+
+        /* Break lines in current frame's codeSequence into first and rest */
+        [moreLines.., line] =>
+            evaluateTokenFromLines(context, stack, frame, moreFrames, line, moreLines),
+    }
+}
+
+pub fn evaluateTokenFromLines(context, stack, frame, moreFrames, line, moreLines) -> {
+    /* Look at line in code sequence. */
+    match line {
+        /* It's empty. We have reached the end of the line. */
+        [] => {
+            /* Convert Value 1 to a LineStart value to persist to next line */
+            let newState = match frame.Value.register {
+                RegisterState::LineStart (v, rat) |
+                RegisterState::FirstValue (v, rat, _) =>
+                	RegisterState::LineStart (v, rat),
+                _ => internalFail() /* Again: if PairValue, should have branched off above */
+			}
+            /* Replace current frame, new code sequence is rest-of-lines, and recurse */
+            moreFrames.push(ExecuteFrame {
+            	register: newState,
+            	code: moreLines,
+            	scope: frame.scope
+            });
+            executeStep(context, moreFrames)
+		},
+		
+        /* Break tokens in current line into first and rest */
+        [moreTokens.., token] =>
+            evaluateTokenFromTokens(context, stack, frame, moreFrames, line, moreLines, token, moreTokens)
+    }
+}
+
+/* Enter a frame as if returning this value from a function. */
+pub fn returnTo(context, stackTop: ExecuteStack, av: ()) -> {
+    /* Trace here ONLY if command line option requests it */
+    if options::run.trace {
+    	println!("<-- {}", pretty::dump_value(av.0));
+    }
+
+    /* Unpack the new stack. */
+    match &*stackTop {
+        /* It's empty. We're returning from the final frame and can just exit. */
+        [] => av.0,
+
+        /* Pull one frame off the stack so we can replace the register var and re-add it. */
+        [pastReturnFrames.., ExecuteFrame {register: parentRegister, code: parentCode, scope: parentScope}] => {
+            let newState = newStateFor(parentRegister, av);
+            pastReturnFrames.push(ExecuteFrame {
+            	register: newState,
+            	code: parentCode,
+            	scope: parentScope
+            });
+            executeStep(context, pastReturnFrames)
+        }
+    }
+}
+
+/* evaluateTokenFromTokens and apply are the functions that "do things"-- they
+   define, ultimately, the meanings of the different kinds of tokens and values. */
+
+pub fn evaluateTokenFromTokens(context, stack, frame, moreFrames, line, moreLines, token, moreTokens) -> {
+    /* Helper: Given a value, and knowing register state, make a new register state and recurse */
+    let stackWithRegister = |register| moreFrames.push(ExecuteFrame {
+    	register: register,
+    	code: { moreLines.push(moreTokens); moreLines },
+    	scope: frame.scope
+    });
+
+    fn simpleValue v -> {
+        /* ...new register state... */
+        let newState = newStateFor frame.Value.register (v,token.Token.at)
+        /* Replace current line by replacing current frame, new line is rest-of-line, and recurse */
+        executeStep context @@ stackWithRegister newState
+
+    fn closureValue v -> {
+        let return,key = match v.Token.closure { Token.ClosureWithBinding(r,k) => r,k | _ => internalFail()
+        let scoped = match v.Token.kind { Token.Scoped => true | _ => false
+        simpleValue Value.(ClosureValue { exec=ClosureExecUser {body=v.Token.items; envScope=frame.scope; key; scoped; return; }; bound=[]; this=Value.ThisBlank; needArgs=(List.length key) })
+
+    /* Identify token */
+    match token.Token.contents {
+        /* Straightforward values that can be evaluated in place: */
+        /* A bare word should be looked up from the scope. */
+        Token.Word s =>   apply context (stackWithRegister frame.Value.register) frame.Value.scope frame.Value.scope (Value::Atom s, token.Token.at)
+        /* A literal value should be simply converted from Token to Value. */
+        Token.String s => simpleValue(Value::String s)
+        Token.Atom s =>   simpleValue(Value::Atom s)
+        Token.Number f => simpleValue(Value::Float f)
+        /* Symbols are not allowed at this point, they can only survive if a macro inserted one. */
+        Token.Symbol s => Token.failToken token @@ "Faulty macro: Symbol "^s^" left unprocessed"
+        /* Not straightforward: This token is a parenthetical. */
+        Token.Group group =>
+            match group.Token.closure {
+                /* Nonclosure groups are nontrivial to evaluate, and will require a new stack frame. */
+                Token.NonClosure =>
+                    /* This creates the new frame with an enclosing scope designated. */
+                    fn pushFrame withInitializerValue -> {
+                        let newScope = (groupScope context group.Token.kind frame.Value.scope withInitializerValue)
+                        let items = match group.Token.kind {
+                            Token.Box _ =>
+                                let wrapperGroup = Token.(clone token @@ Group {kind=Plain; closure=NonClosure; groupInitializer=[]; items=group.Token.items})
+                                let word = Token.(clone token @@ Word Value.currentKeyString)
+                                [ [wrapperGroup]; [word] ]
+                            _ => group.Token.items
+                       
+
+                        /* Trace here ONLY if command line option requests it */
+                        if Options.(run.trace) { print_endline @@ "Group --> " ^ Pretty.dumpValueNewTable newScope;
+
+                        /* New frame: Group descent */
+                        executeStep context @@ (stackFrame newScope items token.Token.at)::(stackWithRegister frame.Value.register)
+
+                    /* Now we need to pick that enclosing scope. */
+                    (match group.Token.groupInitializer {
+                        /* For ordinary groups, it is known: */
+                        [] =>
+                            pushFrame None
+                        /* But groups with an initializer, we must evaluate code to get the scope: */
+                        groupInitializer =>
+                            fn handoff _ _ = function f,_ =>
+                                pushFrame @@ Some f
+                           
+                            executeStep context @@
+                                Value.{register=startRegister token.Token.at;
+                                    code=[groupInitializer]; scope=frame.scope}
+                                :: (stackWithRegister @@ RegisterState::FirstValue(Value::BuiltinHandoff(handoff),token.Token.at,token.Token.at))
+                    )
+                /* Parenthetical is defining a new function. */
+                _ => closureValue group
+
+/* apply item a to item b and return it to the current frame */
+pub fn apply context stack this a b -> {
+    /* FIXME: Document what *exactly* is the definition of b/bat? */
+    let bv,bat = b
+    fn r v = returnTo context stack (v,bat)
+    /* Pull something out of a table, possibly recursing */
+    fn readTable t -> {
+        match (a,Value.tableGet t bv) {
+                _, Some Value::UserMethod f => apply context stack f f (this,bat) /* FIXME: Comment this */
+                _, Some Value::BuiltinMethod      f => r @@ Value::BuiltinFunction(f this)
+                _, Some Value::BuiltinUnaryMethod f => r @@
+                    (try f this with
+                        Failure e => failWithStack stack @@ "Runtime error, applying "^(Pretty.dumpValue a)^" to "^(Pretty.dumpValue bv)^": "^e)
+                Value::Object _, Some (Value.ClosureValue _ as c) => r @@ value_util::rawRethisSuperFrom this c
+                _, Some v => r v
+                _, None =>
+                    match a,Value.tableGet t Value.parentKey {
+                        Value::Object _, Some (Value.ClosureValue _ as parent) =>
+                            apply context stack this (value_util::rawRethisSuperFrom this parent) b
+                        _,Some parent => apply context stack this parent b
+                        _,None => value_util::rawMisapplyStack stack this bv
+    /* Unpack prototypes from context */
+    let {Value.nullProto;trueProto;floatProto;stringProto;atomProto;objectProto} = context
+    /* Perform the application */
+    match a {
+        /* If applying a closure. */
+        Value.ClosureValue c =>
+            fn descend c -> {
+                let bound = List.rev c.Value.bound
+                match c.Value.exec {
+                    Value.ClosureExecUser exec =>
+                        /* FIXME: should be a noscope operation for bound=[], this=None */
+                        let scopeKind = if exec.Value.scoped { Value.WithLet else Value.NoLet
+                        let scope = scopeInheriting scopeKind exec.Value.envScope
+                        let key = exec.Value.key (
+                            /* Trace here ONLY if command line option requests it */
+                            if Options.(run.trace) { print_endline @@ "Closure --> " ^ Pretty.dumpValueNewTable scope;
+
+                            match scope {
+                                Value::Table t =>
+                                    fn addBound keys values = match (keys, values) {
+                                        ([], []) => ()
+                                        (key::restKey, value::restValue) => (
+                                            Value.tableSet t (Value::Atom key) value;
+                                            addBound restKey restValue)
+                                        _ => internalFail()
+                                    (fn setThis current this -> {
+                                        Value.tableSet t Value.currentKey current;
+                                        Value.tableSet t Value.thisKey this;
+                                        Value.tableSet t Value.superKey (value_util::makeSuper current this)
+                                    match c.Value.this {
+                                        Value.CurrentThis(c,t) | Value.FrozenThis(c,t)
+                                            => setThis c t
+                                        _ => ());
+                                    (match c.Value.exec {
+                                        Value.ClosureExecUser({Value.return=true}) =>
+                                            Value.tableSet t Value.returnKey (Value::Continuation (stack,bat))
+                                        _ => ());
+                                    addBound key bound
+                                _ => internalFail()
+                        );
+                        executeStep context @@ (stackFrame scope exec.Value.body bat)::stack
+                Value.ClosureExecBuiltin f =>
+                    r @@ try (f bound) with
+                        Failure e => failWithStack stack @@ "Runtime error, applying builtin closure to arguments ["^ (String.concat ", " @@ List.map Pretty.dumpValue bound) ^"]: " ^ e
+            (match c.Value.needArgs {
+                0 => descend c /* Apply discarding argument */
+                count =>
+                    let amendedClosure = Value.{ c with needArgs=count-1;
+                        bound=bv::c.bound }
+                    match count {
+                        1 => descend amendedClosure /* Apply, using argument */
+                        _ => r (Value.ClosureValue amendedClosure) /* Simply curry and return. Don't descend stack. */
+            )
+
+        Value::Continuation (stack,_) => /* FIXME: Won't this be optimized out? */
+            returnTo context stack b
+
+        /* If applying a table or table op. */
+        Value::Object t  | Value::Table t =>  readTable t
+        /* If applying a primitive value. */
+        Value::Null =>          apply context stack a nullProto b
+        Value::True =>          apply context stack a trueProto b
+        Value::Float v =>  apply context stack a floatProto b
+        Value::String v => apply context stack a stringProto b
+        Value::Atom v =>   apply context stack a atomProto b
+        /* If applying a builtin special. */
+        Value::BuiltinFunction f =>
+            r (try f bv with
+                Failure e => failWithStack stack @@ "Runtime error, applying builtin function to "^(Pretty.dumpValue bv)^": " ^ e)
+        Value::BuiltinHandoff f => /* Note: No this included, so not for methods */
+            f context stack b
+        /* Unworkable -- all builtin method values should be erased by readTable */
+        Value::BuiltinMethod _ | Value::BuiltinUnaryMethod _ | Value::UserMethod _
+            => internalFail()
+
+/* --- MAIN LOOP ENTRY POINT --- */
+
+pub fn execute startingPoint code -> {
+    let {Value.context; Value.rootScope} = startingPoint
+    let initialFrame = stackFrame rootScope [[code]] code.Token.at
+    executeStep context [initialFrame] /* then place it as the start of the stack. */
