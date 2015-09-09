@@ -46,15 +46,17 @@ fn bool_cast(v: bool) -> Value {
 fn ignore_first<T, U>(_: T, x: U) -> U { x }
 
 /* Create a closure from an ocaml function */
-fn snippet_closure<F>(argCount: usize, exec: F) -> Value
+/*
+const fn snippet_closure<F>(argCount: usize, exec: F) -> Value
 	where F: Fn(Vec<Value>) -> Value {
-    Value::ClosureValue(ClosureValue {
+    Value::Closure {
     	exec: ClosureExec::Builtin(exec),
     	need_args: argCount,
         bound: vec![],
         this: ClosureThis::ThisNever
-    })
+    }
 }
+*/
 
 /* For debugging, call this after creating a hashtable set to become a Value */
 fn seal_table(t: TableValue) {
@@ -117,12 +119,12 @@ fn snippet_text_method(source: CodeSource, context: Vec<(String, Value)>, keys: 
 
 fn snippet_apply(closure: Value, val: Value) -> ClosureValue {
     match closure {
-        Value::ClosureValue (cv @ ClosureValue {bound, needArgs, ..}) if needArgs > 1 => {
-            let mut res = cv.clone();
-            res.bound = bound.push(val);
-            res.need_args = needArgs - 1;
-            res
-        },
+        cv @ Value::Closure {bound, needArgs, ..} if needArgs > 1 =>
+            Value::Closure {
+            	bound: bound.clone().push(val),
+            	need_args: need_args - 1,
+            	.. cv
+            },
         _ => panic!("Internal error")
     }
 }
@@ -130,7 +132,21 @@ fn snippet_apply(closure: Value, val: Value) -> ClosureValue {
 /* These first three snippet closures are relied on by the later ones */
 
 /* Ternary function without short-circuiting... */
-static RAW_TERN : Value = snippet_closure(3, |args|
+static RAW_TERN : Value = Value::Closure {
+	exec: ClosureExec::Builtin(|args|
+		if args.len() == 3 {
+			if args[0] == Value::Null { args[2] }
+			else { args[1] }
+		}
+		else {
+			impossible_arg("RAW_TERN");
+		}
+	),
+	need_args: 3,
+	bound: vec![],
+	this: ClosureThis::Never
+};
+/*snippet_closure(3, |args|
 	if args.len() == 3 {
 		if args[0] == Value::Null { args[2] }
 		else { args[1] }
@@ -138,7 +154,8 @@ static RAW_TERN : Value = snippet_closure(3, |args|
 	else {
 		impossible_arg("RAW_TERN");
 	}
-);
+);*/
+
 
 /* ...used to define the ternary function with short-circuiting: */
 static TERN : Value = snippet_text_closure(
@@ -155,19 +172,16 @@ static TERN : Value = snippet_text_closure(
    It takes newborn functions and assigns a this to them. (Old functions just freeze.) */
 fn raw_rethis_assign_object_definition(obj: Value, v: Value) -> Value {
 	match v {
-    	Value::ClosureValue(c @ ClosureValue {this_value:ClosureThis::ThisBlank, ..}) => {
-        	let mut cv = c.clone();
-        	cv.this = token::ClosureThis::CurrentThis(obj, obj);
-        	cv
-        },
-        Value::ClosureValue(c @ ClosureValue {
-        	this: ClosureThis::CurrentThis(current, this),
-        	..
-        }) => {
-        	let mut cv = c.clone();
-        	cv.this = ClosureThis::FrozenThis(current, this);
-        	cv
-        },
+    	c @ Value::Closure {this: ClosureThis::ThisBlank, ..} =>
+    		Value::Closure {
+    			this: ClosureThis::CurrentThis(obj, obj),
+    			.. c
+    		},
+        c @ Value::Closure {this: ClosureThis::CurrentThis(current, this), ..} =>
+        	Value::Closure {
+        		this: ClosureThis::FrozenThis(current, this),
+        		.. c
+        	},
     	_ => v
     }
 }
@@ -176,38 +190,70 @@ fn raw_rethis_assign_object_definition(obj: Value, v: Value) -> Value {
    The "newborn" quality that makes it possible to assign a `this` is lost. */
 fn raw_rethis_assign_object(v: Value) -> Value {
 	match v {
-    	Value::ClosureValue(c @ ClosureValue {this:ThisBlank}) => {
-    		let mut cv = c.clone();
-    		cv.this = ClosureThis::ThisNever;
-    		cv
-    	},
-    	Value::ClosureValue(c @ ClosureValue {this:ClosureThis::CurrentThis(current,this)}) => {
-    		let mut cv = c.clone();
-    		cv.this = CurrentThis::FrozenThis(current,this);
-    		cv
-    	},
+    	c @ Value::Closure {
+    		this: ThisBlank,
+    		..
+    		} =>
+				Value::Closure {
+					this: ClosureThis::ThisNever,
+					.. c
+				},
+    	c @ Value::Closure {
+    		this: ClosureThis::CurrentThis(current, this),
+    		..
+    		} =>
+    			Value::Closure {
+					this: CurrentThis::FrozenThis(current, this),
+					.. c
+				},
     	_ => v
     }
 }
 
 /* Emily versions of the above two */
-static RETHIS_ASSIGN_OBJECT_DEFINITION : Value = snippet_closure(2, |args|
+static RETHIS_ASSIGN_OBJECT_DEFINITION : Value = Value::Closure {
+	exec: ClosureExec::Builtin(|args|
+		if args.len() == 2 {
+			raw_rethis_assign_object_definition(args[0], args[1])
+		}
+		else {
+			impossible_arg("RETHIS_ASSIGN_OBJECT_DEFINITION");
+		}
+	),
+	need_args: 2,
+	bound: vec![],
+	this: ClosureThis::Never
+};
+/*snippet_closure(2, |args|
     if args.len() == 2 {
     	raw_rethis_assign_object_definition(args[0], args[1])
     }
     else {
     	impossible_arg("RETHIS_ASSIGN_OBJECT_DEFINITION");
     }
-);
+);*/
 
-static RETHIS_ASSIGN_OBJECT : Value = snippet_closure(1, |args|
+static RETHIS_ASSIGN_OBJECT : Value = Value::Closure {
+	exec: ClosureExec::Builtin(|args|
+		if args.len() == 1 {
+			raw_rethis_assign_object(args[0])
+		}
+		else {
+			impossible_arg("RETHIS_ASSIGN_OBJECT");
+		}
+	),
+	need_args: 1,
+	bound: vec![],
+	this: ClosureThis::Never
+};
+/*snippet_closure(1, |args|
     if args.len() == 1 {
     	raw_rethis_assign_object(args[0])
     }
     else {
     	impossible_arg("RETHIS_ASSIGN_OBJECT");
     }
-);
+);*/
 
 /* This could have been done in-place with a k combinator */
 fn rethis_assign_object_inside_let<T>(_: T, x: Value) -> Value {
@@ -217,7 +263,23 @@ fn rethis_assign_object_inside_let<T>(_: T, x: Value) -> Value {
 /* This next batch is the functions required to create a blank user table */
 
 /* Most tables need to be prepopulated with a "has". Here's the has tester for a singular table: */
-static RAW_HAS : Value = snippet_closure(2, |args|
+static RAW_HAS : Value = Value::Closure {
+	exec: ClosureExec::Builtin(|args|
+		if args.len() == 2 {
+			match args[0] {
+				Value::TableValue(t) | Value::ObjectValue(t) => bool_cast(table_has(t, vec[1])),
+				v => bad_arg_table("RAW_HAS", v)
+			}
+		}
+		else {
+			impossible_arg("RAW_HAS");
+		}
+	),
+	need_args: 2,
+	bound: vec![],
+	this: ClosureThis::Never
+};
+/*snippet_closure(2, |args|
     if args.len() == 2 {
     	match args[0] {
     		Value::TableValue(t) | Value::ObjectValue(t) => bool_cast(table_has(t, vec[1])),
@@ -227,7 +289,7 @@ static RAW_HAS : Value = snippet_closure(2, |args|
     else {
     	impossible_arg("RAW_HAS");
     }
-);
+);*/
 
 /* A curried one which knows how to check the super class: */
 static HAS_CONSTRUCT : Value = snippet_text_closure(
@@ -250,7 +312,29 @@ fn make_has(obj: Value) -> ClosureValue {
 }
 
 /* Most tables need to be prepopulated with a "set". Here's the setter for a singular table: */
-static RAW_SET : Value = snippet_closure(3, |args| /* TODO: Unify with make_let? */
+static RAW_SET : Value = Value::Closure {
+	exec: ClosureExec::Builtin(|args| // TODO: Unify with make_let?
+		if args.len() == 3 {
+			match args[0] {
+				tv @ Value::TableValue(t) | tv @ Value::ObjectValue(t) => {
+					t.insert(args[1], args[2]);
+					if options::run.trace_set {
+						println!("Set update {}", pretty::dump_value_new_table(tv));
+					}
+					Value::Null
+				},
+				v => bad_arg_table("RAW_SET", v)
+			}
+		}
+		else {
+			impossible_arg("RAW_SET");
+		}
+	),
+	need_args: 3,
+	bound: vec![],
+	this: ClosureThis::Never
+};
+/*snippet_closure(3, |args| // TODO: Unify with make_let?
     if args.len() == 3 {
     	match args[0] {
     		tv @ Value::TableValue(t) | tv @ Value::ObjectValue(t) => {
@@ -267,6 +351,7 @@ static RAW_SET : Value = snippet_closure(3, |args| /* TODO: Unify with make_let?
     	impossible_arg("RAW_SET");
     }
 );
+*/
 
 /* ...And a factory for a curried one that knows how to check the super class: */
 static SET_CONSTRUCT : Value = snippet_text_closure(
@@ -424,22 +509,22 @@ fn table_blank(kind: TableValue) -> TableType {
             let privateTable = table_blank(TableBlankKind::WithLet);
             let currentValue = match kind {
                 BoxKind::NewObject => object_value_blank(Some(OBJECT_PROTOTYPE_KNOT)),
-                BoxKind::NewScope  => Value::TableValue(table_blank(TableBlankKind::WithLet))
+                BoxKind::NewScope  => Value::Table(table_blank(TableBlankKind::WithLet))
             };
             populate_with_set(t);
             /* If you're making an object, it has a "magic" let and current/this: */
             match currentValue {
-                Value::ObjectValue (current) => {
+                Value::Object (current) => {
                     table_set_string(t, LET_KEY_STRING, make_let(raw_rethis_assign_object_definition, currentValue, current));
                     table_set(t, THIS_KEY, currentValue);
                 },
-                Value::TableValue (current) =>
+                Value::Table (current) =>
                     populate_let_for_scope(t, current), /* t is the running scope, scope is the scope-to-return */
                 _ => impossible_arg("object literal setup")
             }
             table_set(t, currentKey, currentValue);
             /* Access to a private value: */
-            table_set(t, privateKey, Value::TableValue(privateTable));
+            table_set(t, privateKey, Value::Table (privateTable));
     	}
     }
     t
@@ -484,14 +569,27 @@ fn raw_rethis_transplant(obj: Value) -> Value {
     }
 }
 
-static RETHIS_TRANSPLANT : Value = snippet_closure(1, |args|
+static RETHIS_TRANSPLANT : Value = Value::Closure {
+	exec: ClosureExec::Builtin(|args|
+		if args.len() == 1 {
+			raw_rethis_transplant(args[0])
+		}
+		else {
+			impossible_arg("RETHIS_TRANSPLANT");
+		}
+	),
+	need_args: 1,
+	bound: vec![],
+	this: ClosureThis::Never
+};
+/*snippet_closure(1, |args|
     if args.len() == 1 {
     	raw_rethis_transplant(args[0])
     }
     else {
     	impossible_arg("RETHIS_TRANSPLANT");
     }
-);
+);*/
 
 /* Helpers for super function */
 fn raw_rethis_super_from(obj: Value, v: Value) -> Value {
@@ -508,23 +606,49 @@ fn raw_rethis_super_from(obj: Value, v: Value) -> Value {
     }
 }
 
-static RETHIS_SUPER_FROM : Value = snippet_closure(2 |args|
+static RETHIS_SUPER_FROM : Value = Value::Closure {
+	exec: ClosureExec::Builtin(|args|
+		if args.len() == 2 {
+			raw_rethis_super_from(args[0], args[1])
+		}
+		else {
+			impossible_arg("RETHIS_SUPER_FROM");
+		}
+	),
+	need_args: 2,
+	bound: vec![],
+	this: ClosureThis::Never
+};
+/*snippet_closure(2, |args|
 	if args.len() == 2 {
 		raw_rethis_super_from(args[0], args[1])
 	}
 	else {
-		impossible_arg("RETHIS_SUPER_FROM")
+		impossible_arg("RETHIS_SUPER_FROM");
 	}
-);
+);*/
 
-static MISAPPLY_ARG : Value = snippet_closure(2, |args|
+static MISAPPLY_ARG : Value = Value::Closure {
+	exec: ClosureExec::Builtin(|args|
+		if args.len() == 2 {
+			raw_misapply_arg(&args[0], &args[1])
+		}
+		else {
+			impossible_arg("MISAPPLY_ARG");
+		}
+	),
+	need_args: 2,
+	bound: vec![],
+	this: ClosureThis::Never
+};
+/*snippet_closure(2, |args|
     if args.len() == 2 {
     	raw_misapply_arg(&args[0], &args[1])
     }
     else {
     	impossible_arg("MISAPPLY_ARG");
     }
-);
+);*/
 
 /* Factory for super functions */
 static SUPER_CONSTRUCT : Value = snippet_text_closure(

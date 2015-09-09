@@ -15,10 +15,13 @@ struct OptionSpec {
     trace_set : bool,
     package_path : Option<String>,
     project_path : Option<String>,
+    dont_need_targets : bool, /* Set indirectly by several options */
 
     /* Things to do instead of execution */
     disassemble : bool,
     disassemble_verbose : bool,
+    print_package : bool,
+    print_project : bool,
     print_version : bool,
     print_machine_version : bool
 }
@@ -45,77 +48,109 @@ fn build_path_set_spec<F>(name, action: F, whatIs: String) -> (, Spec, String)
     (name, Spec::String(action), format!("Directory root for packages loaded from \"{}\"", whatIs))
 }
 
-let () =
-    let targets = ref [] in
-    let seenStdin = ref false in
+fn init() {
+    let mut targets = vec![];
+    let mut seenStdin = false;
 
-    let usage = (fullVersion ^ {|
+    let usage = fullVersion.to_string() + "
 
 Sample usage:
     emily filename.em     # Execute program
     emily -               # Execute from stdin
-    emily -e "println 3"  # Execute from command line
+    emily -e \"println 3\"  # Execute from command line
     emily -i              # Run in interactive mode (REPL)
-    emily -i filename.em  # ...after executing this program
+    emily -i filename.em  # ...after executing this program"
 
-Options:|})
+/* Only include this bit if REPL enabled */
++ if cfg!(BUILD_INCLUDE_REPL) { "
+    emily -i              # Run in interactive mode (REPL)
+    emily -i filename.em  # ...after executing this program"
+else { "" } + "
 
-    in let versionSpec key = (key, Arg.Unit(fun () -> run.printVersion <- true), {|Print interpreter version|})
+Options:";
 
-    in let executeArgs = [ (* Basic arguments *)
-        ("-", Arg.Unit(fun () -> (* Arg's parser means the magic - argument must be passed in this way. *)
-            if !seenStdin then failwith "Attempted to parse stdin twice; that doesn't make sense?"
-                else seenStdin := true; targets := Stdin :: !targets
-        ), ""); (* No summary, this shouldn't be listed with options. *)
+    let version_spec = |key|
+    	(key, Arg.Unit(|| run.print_version = true), "Print interpreter version");
 
-        (* Args *)
-        ("-e", Arg.String(fun f ->
-            targets := Literal f :: !targets
-        ), "Execute code inline");
+    let executeArgs = vec![ /* Basic arguments */
+        ("-", Arg.Unit(|| /* Arg's parser means the magic - argument must be passed in this way. */
+            if !seenStdin {
+            	Err ("Attempted to parse stdin twice; that doesn't make sense?")
+            }
+            else {
+            	seenStdin = true;
+            	targets.push(ExecutionTarget::Stdin);
+            	Ok(())
+            }
+        ), ""), /* No summary, this shouldn't be listed with options. */
 
-        ("-i", Arg.Unit(fun f ->
-            run.repl <- true
-            (*targets := Repl :: !targets*)
-        ), "Enter interactive mode (REPL)");
+        /* Args */
+        ("-e", Arg.String(|f| {
+            targets.push(ExecutionTarget::Literal (f));
+            Ok(())
+        }), "Execute code inline")
+    ];
+    
+    if cfg!(BUILD_INCLUDE_REPL) {
+		executeArgs.push(
+		    ("-i", Arg.Unit(|f| {
+		        run.repl = true;
+		        /* targets.push(ExecutionTarget::Repl); */
+		        Ok(())
+		    }), "Enter interactive mode (REPL)")
+		);
+	}
+	
+	executeArgs.push_all(&[
+	    version_spec("-v"),
+	    version_spec("--version"),
 
-        versionSpec "-v";
-        versionSpec "--version";
+	    ("--machine-version", Arg.Unit(|| {
+	    	run.print_machine_version = true;
+	    	Ok(())
+	    }), "Print interpreter version (machine-readable-- number only)")
+	]);
 
-        ("--machine-version", Arg.Unit(fun () -> run.printMachineVersion <- true), {|Print interpreter version (machine-readable-- number only)|});
-    ]
+    let environment_args = vec![ /* "Config" arguments which can be also set with env vars */
+        build_path_set_spec(["package", "path"], |a| run.package_path = Some (a), "package"),
+        build_path_set_spec(["project", "path"], |a| run.project_path = Some (a), "project")
+    ];
 
-    in let environmentArgs = [ (* "Config" arguments which can be also set with env vars *)
-        buildPathSetSpec ["package";"path"]          (fun a -> run.packagePath <- Some a)  "package";
-        buildPathSetSpec ["project";"path"]          (fun a -> run.projectPath <- Some a)  "project";
-    ]
+    let debug_args = vec![ /* For supporting Emily development itself-- separate out to sort last in help */
+        ("--debug-dis", Arg.Unit(|| run.disassemble = true), "Print \"disassembled\" code and exit"),
+        ("--debug-disv", Arg.Unit(|| run.disassemble_verbose = true), "Print \"disassembled\" code with position data and exit"),
+        ("--debug-macro", Arg.Unit(|| run.step_macro = true), "Print results of each individual macro evaluation"),
+        ("--debug-trace", Arg.Unit(|| run.trace = true), "When executing, print interpreter state"),
+        ("--debug-track", Arg.Unit(|| run.track_objects = true), "When executing, give all objects a unique \"!id\" member"),
+        ("--debug-set", Arg.Unit(|| run.trace_set = true), "When executing, print object contents on each set"),
+        ("--debug-run", Arg.Unit(|| {
+            run.trace = true;
+            run.track_objects = true;
+            run.trace_set = true;
+        }),  "When executing, set all runtime trace type options")
+    ];
 
-    in let debugArgs = [ (* For supporting Emily development itself-- separate out to sort last in help *)
-        ("--debug-dis",   Arg.Unit(fun () -> run.disassemble <- true),        {|Print "disassembled" code and exit|});
-        ("--debug-disv",  Arg.Unit(fun () -> run.disassembleVerbose <- true), {|Print "disassembled" code with position data and exit|});
-        ("--debug-macro", Arg.Unit(fun () -> run.stepMacro <- true),          {|Print results of each individual macro evaluation|});
-        ("--debug-trace", Arg.Unit(fun () -> run.trace <- true),              "When executing, print interpreter state");
-        ("--debug-track", Arg.Unit(fun () -> run.trackObjects <- true),       {|When executing, give all objects a unique "!id" member|});
-        ("--debug-set",   Arg.Unit(fun () -> run.traceSet <- true),           {|When executing, print object contents on each set|});
-        ("--debug-run",   Arg.Unit(fun () ->
-            run.trace <- true;
-            run.trackObjects <- true;
-            run.traceSet <- true
-        ),  {|When executing, set all runtime trace type options|});
-    ]
+    let args = 
+    	executeArgs @ key_mutate_argument(environmentArgs) @ debugArgs;
 
-    in let args = executeArgs @ (keyMutateArgument environmentArgs) @ debugArgs
+    let targetParse = |t| targets.push(ExecutionTarget::File (t));
 
-    in let targetParse t = targets := File t :: !targets
-
-    in
-    ArgPlus.envParse (keyMutateEnvironment environmentArgs);
-    ArgPlus.argParse args targetParse usage (fun _ ->
-        (* Arguments are parsed; either short-circuit with an informational message, or store targets *)
-        if run.printMachineVersion then print_endline version else
-        if run.printVersion then print_endline fullVersion else (
-            run.targets <- List.rev !targets;
-            if (run.repl) then () else match run.targets with
-                | [] -> raise @@ ArgPlus.Help 1 (* No targets! Fail and print help. *)
-                | _  -> ()
-        )
-    )
+    ArgPlus.envParse(key_mutate_environment(environmentArgs));
+    ArgPlus.argParse(args, targetParse, usage, |_|
+        /* Arguments are parsed; either short-circuit with an informational message, or store targets */
+        if run.print_machine_version {
+        	println!(version);
+        }
+        else if run.print_version {
+        	println!(fullVersion);
+        }
+        else {
+            run.targets.reverse();
+            if !run.dont_need_targets {
+            	if run.targets == [] {
+		            return Err (ArgPlus.Help 1) /* No targets! Fail and print help. */
+		        }
+		    }
+        }
+    );
+}

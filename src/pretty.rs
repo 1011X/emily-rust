@@ -1,21 +1,17 @@
 /* Pretty-printers for types from various other files */
 
-mod token;
-mod options;
-mod value;
-
 use std::cmp::Ordering;
 
+use options;
 use token::{
 	TableValue,
 	TokenContents,
 	TokenGroupKind
-}
-
+};
 use value::{
 	Value,
 	ClosureExec
-}
+};
 
 /* --- Code printers --- */
 
