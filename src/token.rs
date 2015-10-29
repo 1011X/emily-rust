@@ -43,7 +43,7 @@ pub enum BoxKind { NewObject, NewScope }
 pub enum TokenGroupKind {
 	Plain,               /* Parenthesis */
 	Scoped,              /* Create a new scope within this group */
-	Box (BoxKind)         /* Create a new object */
+	Box (BoxKind)        /* Create a new object */
 }
 
 /* Is this group a closure? What kind? */

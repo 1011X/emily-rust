@@ -161,31 +161,38 @@ fn dump_value(v: &Value) -> String {
 }
 
 /* FIXME: The formatting here is not even a little bit generalized. */
+
+fn dump_value_unwrapped_table(t: &TableValue) -> String {
+	" = [\n            ".to_string() + 
+	&t.iter()
+		.map(|(v1, v2)| dump_value(v1) + " = " + &dump_value(v2))
+		.collect::<Vec<_>>()
+		.connect("\n            ")
+	+ "\n        ]"
+}
+
 fn dump_value_table(v: &Value) -> String {
-    dump_value(v) + match *v {
-        Value::TableValue (t) | Value::ObjectValue (t) => " = [\n            ".to_string() + 
-			&t.iter()
-				.map(|(v1, v2)| dump_value(v1) + " = " + &dump_value(v2))
-				.collect::<Vec<_>>()
-				.connect("\n            ") + "\n        ]",
-        _ => "".to_string()
-    }
+	dump_value(v) + match *v {
+		Value::TableValue (t) | Value::ObjectValue (t) =>
+			dump_value_unwrapped_table(t),
+		_ => "".to_string()
+	}
 }
 
 fn dump_value_new_table(v: &Value) -> String {
-    if options::run.trace_set {
-    	dump_value_table(v)
-    } else {
-    	dump_value(v)
-    }
+	if options::run.trace_set {
+		dump_value_table(v)
+	} else {
+		dump_value(v)
+	}
 }
 
 /* Normal "print" uses this */
 fn dump_value_for_user(v: &Value) -> String {
-    match *v {
-        Value::StringValue (s) | Value::AtomValue (s) => s,
-        _ => dump_value(v)
-    }
+	match *v {
+		Value::StringValue (s) | Value::AtomValue (s) => s,
+		_ => dump_value(v)
+	}
 }
 
 /* --- repl.ml helper printers --- */
