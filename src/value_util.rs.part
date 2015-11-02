@@ -549,5 +549,3 @@ fn table_set_lazy<F>(table: &mut TableValue, key: Value, func: F)
 where F: Fn() -> Value {
 	table.insert(key, make_lazy(table, key, func));
 }
-
-fn main() {}
