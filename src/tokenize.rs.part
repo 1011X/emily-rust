@@ -11,11 +11,11 @@
 mod token;
 
 struct TokenizeState {
-	lineStart: isize,
+	line_start: isize,
 	line: isize
 }
 
-enum GroupCloseToken { Eof, Char(String) }
+enum GroupCloseToken { Eof, Char (String) }
 
 type GroupCloseRecord = (GroupCloseToken, token::CodePosition);
 
@@ -28,67 +28,93 @@ fn group_close_human_readable(kind: GroupCloseToken) -> String {
 
 /* Entry point to tokenize, takes a filename and a lexbuf */
 /* TODO: Somehow strip blank lines? */
-fn tokenize(enclosingKind: , name, buf : token::Token) {
+fn tokenize(enclosingKind: , name, buf) -> token::Token {
     /* -- Helper regexps -- */
-    let digit = [%sedlex.regexp? '0'..'9'] in
-    let number = [%sedlex.regexp? Plus digit] in
-    let letterPattern = [%sedlex.regexp? 'a'..'z'|'A'..'Z'] in /* TODO: should be "alphabetic" */
-    let wordPattern = [%sedlex.regexp? letterPattern, Star ('A'..'Z' | 'a'..'z' | digit) ] in
-    let floatPattern = [%sedlex.regexp? '.',number | number, Opt('.', number) ] in
-
+    // let digit = Regex::new("[:digit:]").unwrap();
+    let number = Regex::new("[:digit:]+").unwrap();
+    // let octalDigit = Regex::new("[0-7]").unwrap();
+    let octalNumber = Regex::new("0o[0-7]+").unwrap();
+    let hexDigit = Regex::new("[:digit:]|[a-fA-F]").unwrap();
+    let hexNumber = Regex::new("0x[0-9A-Fa-f]").unwrap();
+    let binaryNumber = Regex::new("0b[01]+").unwrap();
+    let letterPattern = Regex::new("[:alpha:]").unwrap();
+    let wordPattern = Regex::new("[:alpha:][:alnum:]*").unwrap();
+    let sciNotation = Regex::new("[eE][-+]?[:digit:]").unwrap();
+    let floatPattern = Regex::new(r"\.[:digit:]+|[:digit:]+(?:.+)?").unwrap();
+    // let numberPattern = Regex::new(r"").unwrap();
+    // TODO: implement
+    
+    
     /* Helper function: We treat a list as a stack by appending elements to the beginning,
        but this means we have to do a reverse operation to seal the stack at the end. */
-    let cleanup = List.rev in
+    let cleanup = |l| l.clone().reverse();
 
     /* Individual lines get a more special cleanup so macro processing can occur */
-    let completeLine l =
-        if Options.(run.stepMacro) then print_endline @@ "-- Macro processing for "^(Token.fileNameString name);
-        Macro.process @@ cleanup l in
+    let completeLine = |l| {
+        if options::run.step_macro { 
+            println!("-- Macro processing for {}", token::file_name_string(name));
+        }
+        macro::process(cleanup(l)) // XXX: possible return?
+    }
 
     /* -- State management machinery -- */
     /* Current tokenizer state */
-    let state = {lineStart=0; line=1} in
+    let state = TokenizeState {line_start: 0, line: 1};
     /* Call when the current selected sedlex match is a newline. Mutates tokenizer state. */
-    let stateNewline () = state.lineStart <- Sedlexing.lexeme_end buf; state.line <- state.line + 1 in
+    let stateNewline = || {
+        state.line_start = (); // FIXME: Sedlexing.lexeme_end buf;
+        state.line += 1;
+    };
     /* Use tokenizer state to translate sedlex position into a codePosition */
-    let currentPosition () = Token.{fileName=name; lineNumber=state.line; lineOffset = Sedlexing.lexeme_end buf-state.lineStart} in
+    let currentPosition = || token::CodePosition {
+        file_name:   name,
+        line_number: state.line,
+        line_offset: // FIXME: Sedlexing.lexeme_end buf-state.line_start
+    };
     /* Parse failure. Include current position string. */
-    let parseFail mesg = Token.failAt (currentPosition()) mesg in
-    let incompleteFail mesg = Token.incompleteAt (currentPosition()) mesg in
+    let parseFail = |mesg| token::fail_at(currentPosition(), mesg);
+    let incompleteFail = |mesg| token::incomplete_at(currentPosition(), mesg);
 
-    (* -- Parsers -- *)
+    /* -- Parsers -- */
 
-    (* Sub-parser: double-quoted strings. Call after seeing opening quote mark *)
-    let rec quotedString () =
-        (* This parser works by statefully adding chars to a string buffer *)
-        let accum = Buffer.create 1 in
-        (* Helper function adds a literal string to the buffer *)
-        let add = Buffer.add_string accum in
-        (* Helper function adds a sedlex match to the buffer *)
-        let addBuf() = add (Sedlexing.Utf8.lexeme buf) in
-        (* Operate *)
-        let rec proceed () =
-            (* Call after seeing a backslash. Matches one character, returns string escape corresponds to. *)
-            let escapedChar () =
-                match%sedlex buf with
-                    | '\\' -> "\\"
-                    | '"' -> "\""
-                    | 'n'  -> "\n"
-                    | _ -> parseFail "Unrecognized escape sequence" (* TODO: devour newlines *)
-            (* Chew through until quoted string ends *)
-            in match%sedlex buf with
-                (* Treat a newline like any other char, but since sedlex doesn't track lines, we have to record it *)
-                | '\n' -> stateNewline(); addBuf(); proceed()
-                (* Backslash found, trigger escape handler *)
-                | '\\' -> add (escapedChar()); proceed()
-                (* Unescaped quote found, we are done. Return the data from the buffer. *)
-                | '"'  -> Buffer.contents accum
-                (* User probably did not intend for string to run to EOF. *)
-                | eof -> incompleteFail "Reached end of file inside string. Missing quote?"
-                (* Any normal character add to the buffer and proceed. *)
-                | any  -> add (Sedlexing.Utf8.lexeme buf); proceed()
-                | _ -> parseFail "Internal failure: Reached impossible place"
-        in proceed()
+    /* Sub-parser: double-quoted strings. Call after seeing opening quote mark */
+    let quoted_string = || {
+        /* This parser works by statefully adding chars to a string buffer */
+        let mut accum = String::with_capacity(1); // Buffer.create 1;
+        /* Helper function adds a literal string to the buffer */
+        let add = |s| accum.push_str(s);
+        /* Helper function adds a sedlex match to the buffer */
+        let addBuf = || add(Sedlexing.Utf8.lexeme buf);
+        /* Operate */
+        let proceed = || {
+            /* Call after seeing a backslash. Matches one character, returns string escape corresponds to. */
+            let escapedChar = || match%sedlex buf {
+                '\\' => "\\",
+                '"'  => "\"",
+                'n'  => "\n",
+                _    => parse_fail("Unrecognized escape sequence") /* TODO: devour newlines */
+            };
+            /* Chew through until quoted string ends */
+            match%sedlex buf {
+                /* Treat a newline like any other char, but since sedlex doesn't track lines, we have to record it */
+                '\n' => {
+                    stateNewline();
+                    addBuf();
+                    proceed();
+                },
+                /* Backslash found, trigger escape handler */
+                '\\' => add (escapedChar()); proceed()
+                /* Unescaped quote found, we are done. Return the data from the buffer. */
+                '"'  => Buffer.contents accum
+                /* User probably did not intend for string to run to EOF. */
+                eof  => incompleteFail "Reached end of file inside string. Missing quote?"
+                /* Any normal character add to the buffer and proceed. */
+                any  => add (Sedlexing.Utf8.lexeme buf); proceed()
+                _    => parseFail "Internal failure: Reached impossible place"
+            }
+        }
+        proceed()
+    };
 
     (* Sub-parser: backslash. Eat up to, and possibly including, newline *)
     in let rec escape seenText =

@@ -1,6 +1,10 @@
 [package]
 name = "emily-rust"
-version = "0.0.0"
+version = "0.0.1"
 authors = [
 	"1011X <1011XXXXX@gmail.com>"
 ]
+
+[dependencies]
+regex = "0.1.41"
+lazy_static = "0.1.*"
