@@ -14,122 +14,121 @@ mod tokenize;
 
 use std::collections::HashMap;
 use value::*;
-use token::{
-	CodeSource,
-	BoxKind
-}
+use token::*;
 
 /* Misc failure throw methods */
-fn badArg(desired: &str, name: &str, var: Value) -> ! {
-	panic!("Bad argument to {}: Need {}, got {}", name, desired, pretty::dumpValue(var));
+fn bad_arg(desired: &'static str, name: &'static str, var: Value) -> ! {
+	panic!("Bad argument to {}: Need {}, got {}", name, desired, pretty::dump_value(var))
 }
 
-fn badArgTable(name: &str, var: Value) -> ! {
-	badArg("table", name, var);
+fn bad_arg_table(name: &'static str, var: Value) -> ! {
+	bad_arg("table", name, var);
 }
 
-fn badArgClosure(name: &str, var: Value) -> ! {
-	badArg("closure", name, var);
+fn bad_arg_closure(name: &'static str, var: Value) -> ! {
+	bad_arg("closure", name, var);
 }
 
-fn impossibleArg(name: &str) -> ! {
+fn impossible_arg(name: &'static str) -> ! {
 	panic!("Internal failure: Impossible argument to {}", name);
 }
 
 
-fn misapplyString(a: &Value, b: &Value) -> String {
-	format!("Runtime failure: {} can't respond to {}", pretty::dumpValue(a), pretty::dumpValue(b))
+fn misapply_string(a: &Value, b: &Value) -> String {
+	format!("Runtime failure: {} can't respond to {}", pretty::dump_value(a), pretty::dump_value(b))
 }
 
-fn rawMisapplyArg(a: &Value, b: &Value) -> ! {
-	panic!(misapplyString(a, b))
+fn raw_misapply_arg(a: &Value, b: &Value) -> ! {
+	panic!("{}", misapply_string(a, b));
 }
 
 /* Tools */
-fn boolCast(v: bool) -> Value {
+fn bool_cast(v: bool) -> Value {
 	if v { Value::True }
 	else { Value::Null }
 }
 
-fn ignoreFirst<T, U>(_: T, x: U) -> U { x }
+/* Create a closure from a function */
 
-/* Create a closure from an ocaml function */
-
-fn snippetClosure<F>(argCount: usize, exec: F) -> Value
+fn snippet_closure<F>(argCount: usize, exec: F) -> Value
 where F: Fn(Vec<Value>) -> Value {
-	Value::Closure {
+	Value::Closure (ClosureValue {
 		exec: ClosureExec::Builtin(exec),
-		needArgs: argCount,
+		need_args: argCount,
 		bound: vec![],
-		this: ClosureThis::ThisNever
-	}
+		this: ClosureThis::Never
+	})
 }
 
 /* For debugging, call this after creating a hashtable set to become a Value */
-fn sealTable(t: TableValue) {
+fn seal_table(t: &mut TableValue) {
 	unsafe {
-		if options::run.trackObjects {
+		if options::run.track_objects {
 			ID_GENERATOR += 1.0;
-			t.insert(ID_KEY, Value::FloatValue(ID_GENERATOR));
+			t.insert(ID_KEY, Value::Float (ID_GENERATOR));
 		}
 	}
 }
 
-/* Same as calling tableBlank(TrueBlank). We need a separate version because
-   tableBlank relies on some of the functions that require tableTrueBlank
+/* Same as calling table_blank(TrueBlank). We need a separate version because
+   table_blank relies on some of the functions that require table_true_blank
    to themselves be defined, and it gets awkward w/mutual recursion. */
-fn tableTrueBlank() -> TableValue {
-	let t = HashMap::withCapacity(1);
-	sealTable(t);
+fn table_true_blank() -> TableValue {
+	let mut t = HashMap::with_capacity(1);
+	seal_table(&mut t);
 	t
 }
 
-fn tableTrueBlankInheriting(v: Value) -> TableValue {
-	let t = tableTrueBlank();
-	t.insert(PARENT_KEY, v);
+fn table_true_blank_inheriting(v: &Value) -> TableValue {
+	let mut t = table_true_blank();
+	t.insert(value::PARENT_KEY.clone(), v.clone());
 	t
 }
 
-/* Makes a scope to be used in a snippetTextClosure */
-fn snippetScope(bindings: Vec<(String, Value)>) -> Value {
-	let scopeTable = tableTrueBlank();
+/* Makes a scope to be used in a snippet_text_closure */
+fn snippet_scope(bindings: Vec<(String, Value)>) -> Value {
+	let mut scopeTable = table_true_blank();
 	for (k, v) in bindings {
-		scopeTable.insert(Value::AtomValue(k), v);
+		scopeTable.insert(Value::Atom (k.clone()), v.clone());
 	}
-	Value::TableValue(scopeTable)
+	Value::Table (scopeTable)
 }
 
 /* Define an ad hoc function using a literal string inside the interpreter. */
-fn snippetTextClosureAbstract(source: CodeSource, thisKind: ClosureThis, context: Vec<(String, Value)>, keys: Vec<String>, text: String) -> Value {
-	Value::Closure {
-		exec: ClosureExec::User {
-			body: tokenize::snippet(source, text),
-			envScope: snippetScope(context),
+fn snippet_text_closure_abstract(source: CodeSource, thisKind: ClosureThis, context: Vec<(String, Value)>, keys: Vec<String>, text: String) -> Value {
+	Value::Closure (ClosureValue {
+		exec: ClosureExec::User(ClosureExecUser {
+			body: tokenize::snippet(source.clone(), text.clone()),
+			env_scope: snippet_scope(context),
 			scoped: false,
 			key: keys,
-			hasReturn: false
-		},
-		needArgs: keys.len(),
+			has_return: false
+		}),
+		need_args: keys.len(),
 		bound: vec![],
-		thisValue: thisKind
-	}
+		this_value: thisKind
+	})
 }
 
 /* Define an ad hoc function using a literal string inside the interpreter. */
-fn snippetTextClosure(source: CodeSource, context: Vec<(String, Value)>, keys: Vec<String>, text: String) -> Value {
-	snippetTextClosureAbstract(source, ClosureThis::ThisNever, context, keys, text)
+fn snippet_text_closure(source: CodeSource, context: Vec<(String, Value)>, keys: Vec<String>, text: String) -> Value {
+	snippet_text_closure_abstract(source, ClosureThis::Never, context, keys, text)
 }
 
-fn snippetTextMethod(source: CodeSource, context: Vec<(String, Value)>, keys: Vec<String>, text: String) -> Value {
-	snippetTextClosureAbstract(source, ClosureThis::ThisBlank, context, keys, text)
+fn snippet_text_method(source: CodeSource, context: Vec<(String, Value)>, keys: Vec<String>, text: String) -> Value {
+	snippet_text_closure_abstract(source, ClosureThis::Blank, context, keys, text)
 }
 
-fn snippetApply(closure: Value, val: Value) -> ClosureValue {
+fn snippet_apply(closure: Value, val: Value) -> ClosureValue {
 	match closure {
-		cv @ Value::Closure {bound, needArgs, ..} if needArgs > 1 =>
-			Value::Closure {
-				bound: bound.clone().push(val),
-				needArgs: needArgs - 1,
+		Value::Closure (cv @ ClosureValue {bound, need_args}) if need_args > 1 =>
+			ClosureValue {
+				bound: {
+					let mut c = bound.clone();
+					c.push(val);
+					c
+				},
+				need_args: need_args - 1,
 				.. cv
 			},
 		_ => panic!("Internal error")
@@ -138,22 +137,22 @@ fn snippetApply(closure: Value, val: Value) -> ClosureValue {
 
 /* These first three snippet closures are relied on by the later ones */
 lazy_static! {
-	/* internal.tern exposes this */
 	/* Ternary function without short-circuiting... */
-	pub static ref rawTern : Value = snippetClosure(3, |args|
+	/* internal.tern exposes this */
+	pub static ref RAW_TERN : Value = snippet_closure(3, |args|
 		match &*args {
 			[Value::Null, _, v] => v,
 			[_, v, _] => v,
-			_ => impossibleArg("rawTern")
+			_ => impossible_arg("RAW_TERN")
 		}
 	);
 	
 	/* ...used to define the ternary function with short-circuiting: */
-	/* This is used by snippets that require tern, but tern in scopePrototype is separate. */
-	pub static ref tern = snippetTextClosure(
+	/* This is used by snippets that require tern, but tern in scope_prototype is separate. */
+	pub static ref TERN = snippet_text_closure(
 		CodeSource::Internal("tern".to_string()),
 		vec![
-			("rawTern", rawTern),
+			("rawTern", RAW_TERN),
 			("null", Value::Null)
 		],
 		vec!["pred", "a", "b"],
@@ -163,165 +162,160 @@ lazy_static! {
 
 /* This handles what occurs when you assign to a table while defining a new object literal.
    It takes newborn functions and assigns a this to them. (Old functions just freeze.) */
-fn rawRethisAssignObjectDefinition(obj: Value, v: Value) -> Value {
+fn raw_rethis_assign_object_definition(obj: Value, v: Value) -> Value {
 	match v {
-		c @ Value::Closure {this: ClosureThis::ThisBlank, ..} =>
-			Value::Closure {
-				this: ClosureThis::CurrentThis(obj, obj),
+		Value::Closure (c @ ClosureValue {this: ClosureThis::Blank, ..}) =>
+			Value::Closure (ClosureValue {
+				this: ClosureThis::Current(obj, obj.clone()),
 				.. c
-			},
-		c @ Value::Closure {this: ClosureThis::CurrentThis(current, this), ..} =>
-			Value::Closure {
-				this: ClosureThis::FrozenThis(current, this),
+			}),
+		Value::Closure (c @ ClosureValue {this: ClosureThis::Current(current, this), ..}) =>
+			Value::Closure (ClosureValue {
+				this: ClosureThis::Frozen(current, this),
 				.. c
-			},
+			}),
 		_ => v
 	}
 }
 
 /* This handles what occurs when you assign to a table at any other time:
    The "newborn" quality that makes it possible to assign a `this` is lost. */
-fn rawRethisAssignObject(v: Value) -> Value {
+fn raw_rethis_assign_object(v: Value) -> Value {
 	match v {
-		c @ Value::Closure {this: ThisBlank, ..} =>
-				Value::Closure {
-					this: ClosureThis::ThisNever,
-					.. c
-				},
-		c @ Value::Closure {
-			this: ClosureThis::CurrentThis(current, this),
-			..
-			} =>
-				Value::Closure {
-					this: CurrentThis::FrozenThis(current, this),
-					.. c
-				},
+		Value::Closure (c @ ClosureValue {this: ClosureThis::Blank, ..}) =>
+			Value::Closure (ClosureValue {
+				this: ClosureThis::Never,
+				.. c
+			}),
+		Value::Closure (c @ ClosureValue {this: ClosureThis::Current(current, this), ..}) =>
+			Value::Closure (ClosureValue {
+				this: CurrentThis::Frozen(current, this),
+				.. c
+			}),
 		_ => v
 	}
 }
 
 lazy_static! {
 	/* Emily versions of the above two */
-	pub static ref rethisAssignObjectDefinition : Value = snippetClosure(2, |args|
+	pub static ref RETHIS_ASSIGN_OBJECT_DEFINITION : Value = snippet_closure(2, |args|
 		match &*args {
-			[obj, a] => rawRethisAssignObjectDefinition(obj, a),
-			_ => impossibleArg("rethisAssignObjectDefinition")
+			[obj, a] => raw_rethis_assign_object_definition(obj, a),
+			_ => impossible_arg("RETHIS_ASSIGN_OBJECT_DEFINITION")
 		}
 	);
 
-	pub static ref rethisAssignObject : Value = snippetClosure(1, |args|
+	pub static ref RETHIS_ASSIGN_OBJECT : Value = snippet_closure(1, |args|
 		match &*args {
-			[a] => rawRethisAssignObject(a),
-			_ => impossibleArg("RETHIS_ASSIGN_OBJECT");
+			[a] => raw_rethis_assign_object(a),
+			_ => impossible_arg("RETHIS_ASSIGN_OBJECT");
 		}
 	);
-}
-
-/* Setup for filter-based functions */
-/* FIXME: Remove need for target */
-fn actTableSet(target: Value, t: &mut TableValue, key: Value, value: Value) {
-	t.insert(key, value);
-	if options::run.traceSet {
-		println!("Set update {}", pretty::dumpValueNewTable(target);
-	}
-}
-
-fn actTableSetWith(modifier: F, target: Value, t: TableValue, key: Value, value: Value)
-where F: Fn(Value, Value) -> Value {
-	actTableSet(target, t, key, modifier(target, value));
-}
-
-fn actPairTableSet(t1v: Value, t1: TableValue, t2v: Value, t2: TableValue, key: Value, value: Value) {
-	actTableSet(t1v, t1, key, value);
-	actTableSet(t2v, t2, key, value);
 }
 
 /* This could have been done in-place with a k combinator */
-fn rethisAssignObjectInsideLet<T>(_: T, x: Value) -> Value {
-	rawRethisAssignObject(x)
+fn rethis_assign_object_inside_let(_: Value, x: Value) -> Value {
+	raw_rethis_assign_object(x)
 }
 
 /* This next batch is the functions required to create a blank user table */
 
+/* Setup for filter-based functions */
+/* FIXME: Remove need for target */
+fn act_table_set(target: &Value, t: &mut TableValue, key: Value, value: Value) {
+	t.insert(key, value);
+	if options::run.trace_set {
+		println!("Set update {}", pretty::dump_value_new_table(target));
+	}
+}
+
+fn act_table_set_with(modifier: F, target: Value, t: TableValue, key: Value, value: Value)
+where F: Fn(Value, Value) -> Value {
+	act_table_set(target, t, key, modifier(target, value));
+}
+
+fn act_pair_table_set(t1v: Value, t1: TableValue, t2v: Value, t2: TableValue, key: Value, value: Value) {
+	act_table_set(t1v, t1, key, value);
+	act_table_set(t2v, t2, key, value);
+}
+
 lazy_static! {
 	/* Most tables need to be prepopulated with a "has". Here's the has tester for a singular table: */
-	pub static ref rawHas : Value = snippetClosure(2, |args|
+	pub static ref RAW_HAS : Value = snippet_closure(2, |args|
 		match &*args {
-			[Value::Table (t), key] |
-			[Value::Object (t), key] =>
-				boolCast(t.contains_key(key)),
-		
-			[v, _] => badArgTable("rawHas", v),
-			_ => impossibleArg("rawTern")
+			[Value::Table (t), key] | [Value::Object (t), key] =>
+				bool_cast(t.contains_key(key)),
+			
+			[v, _] => bad_arg_table("RAW_HAS", v),
+			_ => impossible_arg("RAW_HAS")
 		}
 	);
 
 	/* A curried one which knows how to check the super class: */
-	pub static ref hasConstruct : Value = snippetTextClosure(
-		CodeSource::Internal("hasConstruct".to_string()),
+	pub static ref HAS_CONSTRUCT : Value = snippet_text_closure(
+		Code_source::Internal("hasConstruct".to_string()),
 		vec![
-			("rawHas", rawHas),
-			("tern", tern),
+			("rawHas", RAW_HAS),
+			("tern", TERN),
 			("true", Value::True),
 			("null", Value::Null)
 		],
 		vec!["obj", "key"],
-		"tern (rawHas obj key) ^(true) ^(\
+		"tern (rawHas obj key) ^(true) ^(
 		     tern (rawHas obj .parent) ^(obj.parent.has key) ^(null)\
 		 )".to_string()
 	);
 }
 
 /* ...And a factory for one with a preset object: */
-fn makeHas(obj: Value) -> ClosureValue {
-	snippetApply(HAS_CONSTRUCT, obj)
+fn make_has(obj: Value) -> ClosureValue {
+	snippet_apply(*HAS_CONSTRUCT, obj)
 }
 
 lazy_static! {
 	/* Most tables need to be prepopulated with a "set". Here's the setter for a singular table: */
-	pub static ref rawSet : Value = snippetClosure(3, |args| // TODO: Unify with makeLet?
+	pub static ref RAW_SET : Value = snippet_closure(3, |args| // TODO: Unify with make_let?
 		match &*args {
-			[tv @ Value::Table (t), key, value] |
-			[tv @ Value::Object (t), key, value] => {
-				actTableSet(tv, t, key, value);
+			[tv @ Value::Table (t), key, value] | [tv @ Value::Object (t), key, value] => {
+				act_table_set(tv, t, key, value);
 				Value::Null
 			},
-		
-			[v, _, _] => badArgTable("rawSet", v),
-			_ => impossibleArg("rawSet")
+			
+			[v, _, _] => bad_arg_table("RAW_SET", v),
+			_ => impossible_arg("RAW_SET")
 		}
 	);
 
 	/* ...And a factory for a curried one that knows how to check the super class: */
-	pub static ref setConstruct : Value = snippetTextClosure(
+	pub static ref SET_CONSTRUCT : Value = snippet_text_closure(
 		CodeSource::Internal("SET_CONSTRUCT"),
 		vec![
-			("rawHas", rawHas),
-			("rawSet", rawSet),
-			("tern", tern),
+			("rawHas", RAW_HAS),
+			("rawSet", RAW_SET),
+			("tern", TERN),
 			("true", Value::True),
 			("null", Value::Null)
 		],
 		vec!["obj", "key", "value"],
-		"tern (rawHas obj key) ^(rawSet obj key value) ^(\
+		"tern (rawHas obj key) ^(rawSet obj key value) ^(
 		     obj.parent.set key value                # Note: Fails in an inelegant way if no parent\
 		 )".to_string()
 	);
 }
 
-fn makeSet(obj: Value) -> ClosureValue {
-	snippetApply(SET_CONSTRUCT, obj)
+fn make_set(obj: Value) -> ClosureValue {
+	snippet_apply(*SET_CONSTRUCT, obj)
 }
 
 lazy_static! {
 /* Same thing, but for an ObjectValue instead of a TableValue.
    The difference lies in how "this" is treated */
-	pub static ref objectSetConstruct : Value = snippetTextClosure(
-		CodeSource::Internal("objectSetConstruct"),
+	pub static ref OBJECT_SET_CONSTRUCT : Value = snippet_text_closure(
+		CodeSource::Internal("OBJECT_SET_CONSTRUCT"),
 		vec![
-			("rawHas", rawHas),
-			("rawSet", rawSet),
-			("tern", tern),
+			("rawHas", RAW_HAS),
+			("rawSet", RAW_SET),
+			("tern", TERN),
 			("true", Value::True),
 			("null", Value::Null),
 			("modifier", RETHIS_ASSIGN_OBJECT)
@@ -333,58 +327,69 @@ lazy_static! {
 	);
 }
 
-fn makeObjectSet(obj: Value) -> ClosureValue {
-	snippetApply(OBJECT_SET_CONSTRUCT, obj)
+fn make_object_set(obj: Value) -> ClosureValue {
+	snippet_apply(*OBJECT_SET_CONSTRUCT, obj)
 }
 
 /* Many tables need to be prepopulated with a "let". Here's the let setter for a singular table: */
 /* TODO: Don't 'make' like this? */
-fn makeLet<F>(action: F, target: Value, t: TableValue) -> Value
-where F: Fn(Value, Value) {
-	snippetClosure(2, |args|
+fn make_let<F: Fn(Value, Value)>(action: F) -> Value {
+	snippet_closure(2, |args|
 		match &*args {
 			[key, value] => {
 				action(key, value);
 				Value::Null
 			},
-			_ => impossibleArg("makeLet")
+			_ => impossible_arg("make_let")
 		}
 	)
 }
 
-/* Helpers for tableBlank */
-fn populateWithHas(t: TableValue) {
-	tableSetString(t, Value::hasKeyString, makeHas(Value::Table (t))); /* FIXME: Should this ever be ObjectValue...? */
+/* Helpers for table_blank */
+fn populate_with_has(t: &mut TableValue) {
+	table_set_string(t, value::HAS_KEY_STRING.to_string(), make_has(Value::Table (t.clone()))); /* FIXME: Should this ever be ObjectValue...? */
 }
 
-fn populateWithSet(t: TableValue) {
-	populateWithHas(t);
-	tableSetString(t, Value::SET_KEY_STRING, makeSet(Value::Table (t)));
+fn populate_with_set(t: &mut TableValue) {
+	populate_with_has(t);
+	table_set_string(t, value::SET_KEY_STRING.to_string(), make_set(Value::Table (t.clone())));
 }
 
-/* An object is self-referential, so is more complicated than a simple blank table;
-   the table and value must be created together. */
-/* table, value convention */
-static mut OBJECT_PROTOTYPE_KNOT : Value = Value::Null;
-
-/* Not unified with tableBlank because it returns a value */
-fn objectBlank(context: Value) -> Value {
-	let obj = tableTrueBlank();
-	let objValue = Value::Object (obj);
-	populateWithHas(obj);
-	tableSetString(obj, value::setKeyString, makeObjectSet(objValue));
-	tableSetString(obj, value::letKeyString, makeLet(actTableSetWith, rethisAssignObjectInsideLet, objValue, obj));
-	tableSetString(obj, value::PARENT_KEY_STRING, context.object_proto);
+/* Not unified with table_blank because it returns a value */
+/* TODO: convert
+fn object_blank(context: ExecuteContext) -> Value {
+	let mut obj = table_true_blank();
+	let objValue = Value::Object (obj.clone());
+	
+	populate_with_has(&mut obj);
+	table_set_string(&mut obj,
+		value::SET_KEY_STRING.to_string(),
+		Value::Closure(make_object_set(objValue.clone()))
+	);
+	table_set_string(&mut obj,
+		value::LET_KEY_STRING.to_string(),
+		make_let(
+			act_table_set_with,
+			rethis_assign_object_inside_let,
+			objValue,
+			obj
+		)
+	);
+	table_set_string(&mut obj,
+		value::PARENT_KEY_STRING.to_string(),
+		context.object_proto
+	);
 	objValue
 }
+*/
 
-/* FIXME: Once actTableSet no longer takes a table value, the dummy TableValue will not be needed */
-fn populateLetForScope(storeIn: TableValue, writeTo: Value) {
-	tableSetString(
+/* FIXME: Once act_table_set no longer takes a table value, the dummy TableValue will not be needed */
+fn populate_let_for_scope(storeIn: TableValue, writeTo: Value) {
+	table_set_string(
 		storeIn,
-		value::LET_KEY_STRING,
-		makeLet(
-			actTableSet(
+		value::LET_KEY_STRING.to_string(),
+		make_let(
+			act_table_set(
 				Value::Table (writeTo),
 				writeTo
 			)
@@ -393,15 +398,15 @@ fn populateLetForScope(storeIn: TableValue, writeTo: Value) {
 }
 
 /* Give me a simple table of the requested type, prepopulate with basics. */
-fn tableBlank(kind: TableValue) -> TableType {
-	let t = tableTrueBlank();
+fn table_blank(kind: TableBlankKind) -> TableType {
+	let t = table_true_blank();
 	match kind {
 		TableBlankKind::TrueBlank => (),
-		TableBlankKind::NoSet => populateWithHas(t),
-		TableBlankKind::NoLet => populateWithSet(t),
+		TableBlankKind::NoSet => populate_with_has(t),
+		TableBlankKind::NoLet => populate_with_set(t),
 		TableBlankKind::WithLet => {
-			populateWithSet(t);
-			populateLetForScope(t, t);
+			populate_with_set(t);
+			populate_let_for_scope(t, t);
 		}
 	}
 	t
@@ -410,85 +415,89 @@ fn tableBlank(kind: TableValue) -> TableType {
 enum BoxTarget { Package, Object }
 type BoxSpec = Populating(BoxTarget, Value);
 
-let boxBlank boxKind boxParent =
-    let Populating(targetType,targetValue) = boxKind in
-    let t = tableBlank NoLet in
-    let privateTable = tableBlank NoLet in
-    let privateValue = TableValue privateTable in
-    let targetTable = tableFrom targetValue in
-    tableSet privateTable Value.letKey (makeLet @@ (* Another fallacious value usage *)
-        actPairTableSet privateValue privateTable (TableValue t) t
-    );
-    tableSet t Value.letKey (makeLet @@ (* See objects.md *)
-        if targetType=Package then
-            actPairTableSet targetValue targetTable (TableValue t) t
-        else
-            actTableSetWith rawRethisAssignObjectDefinition targetValue targetTable
-    );
-    if targetType=Package then
-        tableSet t exportLetKey (makeLet @@ actTableSet targetValue targetTable);
-    tableSet t thisKey   targetValue;
-    tableSet t parentKey boxParent;
-    tableSet t currentKey targetValue;
-    (* Access to a private value: *)
-    tableSet t privateKey privateValue;
+fn box_blank(boxKind: BoxSpec, boxParent: Value) -> TableType {
+    let Populating(targetType, targetValue) = boxKind;
+    let mut t = table_blank(TableBlankKind::NoLet);
+    let mut privateTable = table_blank(TableBlankKind::NoLet);
+    let privateValue = Value::Table(privateTable);
+    let targetTable = table_from(targetValue);
+    privateTable.insert(value::LET_KEY, make_let( /* Another fallacious value usage */
+    	/* TODO: currying */
+        act_pair_table_set(privateValue, privateTable, Value::Table (t), t)
+    ));
+    table_set(t, Value::LET_KEY, make_let( /* See objects.md */
+        if targetType == Package {
+        	/* TODO: currying */
+            act_pair_table_set(targetValue, targetTable, Value::Table (t), t)
+        }
+        else {
+            act_table_set_with(raw_rethis_assign_object_definition, targetValue, targetTable)
+        }
+    ));
+    if targetType == Package {
+        t.insert(value::export_let_key, make_let(act_table_set(targetValue, targetTable)))
+    }
+    t.insert(value::THIS_KEY, targetValue);
+    t.insert(value::PARENT_KEY, boxParent);
+    t.insert(value::CURRENT_KEY, targetValue);
+    /* Access to a private value: */
+    t.insert(value::PRIVATE_KEY, privateValue);
     t
+}
 
-fn tableInheriting(tableKind: TableValue, v: Value) -> TableType {
-	let mut t = tableBlank(tableKind);
+fn table_inheriting(tableKind: TableBlankKind, v: Value) -> TableType {
+	let mut t = table_blank(tableKind);
 	t.insert(value::PARENT_KEY, v);
 	t
 }
 
 /* Not used by interpreter, but present for user */
-fn rawRethisTransplant(obj: Value) -> Value {
+fn raw_rethis_transplant(obj: Value) -> Value {
 	match obj {
-		Value::Closure {..c} => Value::Closure {this: ClosureThis::Blank, ..c},
+		Value::Closure (c) =>
+			Value::Closure (ClosureValue {this: ClosureThis::Blank, ..c}),
 		_ => obj
 	}
 }
 
 lazy_static! {
-	pub static ref RETHIS_TRANSPLANT : Value = snippetClosure(1, |args|
+	pub static ref RETHIS_TRANSPLANT : Value = snippet_closure(1, |args|
 		match &*args {
-			[obj] => rawRethisTransplant(obj),
-			_ => impossibleArg("RETHIS_TRANSPLANT")
+			[obj] => raw_rethis_transplant(obj),
+			_ => impossible_arg("RETHIS_TRANSPLANT")
 		}
 	);
 }
 
 /* Helpers for super function */
-fn rawRethisSuperFrom(obj: Value, v: Value) -> Value {
+fn raw_rethis_super_from(obj: Value, v: Value) -> Value {
 	match v {
-		Value::ClosureValue(c @ ClosureValue {
-			this: ClosureThis::CurrentThis(current, _),
-			..
-		}) => {
-			let mut cv = c.clone();
-			cv.this = ClosureThis::CurrentThis(current, obj);
-			Value::ClosureValue(cv)
-		},
+		Value::Closure (c @ ClosureValue {this: ClosureThis::Current (current, _), ..}) =>
+			Value::Closure (ClosureValue {
+				this: ClosureThis::Current (current, obj),
+				..c
+			}),
 		_ => v
 	}
 }
 
 lazy_static! {
-	pub static ref RETHIS_SUPER_FROM : Value = snippetClosure(2, |args|
+	pub static ref RETHIS_SUPER_FROM : Value = snippet_closure(2, |args|
 		match &*args {
-			[obj, a] => rawRethisSuperFrom(obj, a),
-			_ => impossibleArg("RETHIS_SUPER_FROM")
+			[obj, a] => raw_rethis_super_from(obj, a),
+			_ => impossible_arg("RETHIS_SUPER_FROM")
 		}
 	);
 
-	pub static ref MISAPPLY_ARG : Value = snippetClosure(2, |args|
+	pub static ref MISAPPLY_ARG : Value = snippet_closure(2, |args|
 		match &*args {
-			[a, b] => rawMisapplyArg(a, b),
-			_ => impossibleArg("MISAPPLY_ARG")
+			[a, b] => raw_misapply_arg(a, b),
+			_ => impossible_arg("MISAPPLY_ARG")
 		}
 	);
 
 	/* Factory for super functions */
-	pub static ref SUPER_CONSTRUCT : Value = snippetTextClosure(
+	pub static ref SUPER_CONSTRUCT : Value = snippet_text_closure(
 		CodeSource::Internal("SUPER_CONSTRUCT"),
 		vec![
 			("rethis", RETHIS_SUPER_FROM),
@@ -501,43 +510,44 @@ lazy_static! {
 	);
 }
 
-fn makeSuper(current: Value, this: Value) -> ClosureValue {
-	snippetApply(Value::ClosureValue(snippetApply(SUPER_CONSTRUCT, current)), this)
+fn make_super(current: Value, this: Value) -> ClosureValue {
+	snippet_apply(Value::Closure (snippet_apply(*SUPER_CONSTRUCT, current)), this)
 }
 
-fn stackString(stack: ExecuteStack) -> String {
+fn stack_string(stack: ExecuteStack) -> String {
 	let mut result = "Stack:".to_string();
 	for frame in stack.iter().rev() {
 		result.push_str("\n\t");
-		result.push_str(&(match frame {
-			ExecuteFrame {register: RegisterState::LineStart (..), ref code, .. }
+		result.push_str(match frame {
+			ExecuteFrame {register: RegisterState::LineStart (..), ref code, ..}
 			if !code.isEmpty() && !code[0].isEmpty() =>
-				token::positionString(&code[0][0].at),
+				&token::position_string(&code[0][0].at),
 			ExecuteFrame {register: RegisterState::FirstValue (_, _, ref at), ..} |
 			ExecuteFrame {register: RegisterState::PairValue (_, _, _, ref at), ..} =>
-				token::positionString(at),
-			ExecuteFrame {ref code, ..} if code.isEmpty() => "<empty file>".to_string(),
-			ExecuteFrame {ref code, ..} if code[0].isEmpty() => "<lost place>".to_string()
-		}));
+				&token::position_string(at),
+			ExecuteFrame {ref code, ..} if code.is_empty() => "<empty file>",
+			ExecuteFrame {ref code, ..} if code[0].is_empty() => "<lost place>"
+		});
 	}
 	result
 }
 
-fn rawMisapplyStack(stack: ExecuteStack, a: &Value, b: &Value) -> Result<(), String> {
-	Err(format!("{}\n{}", misapplyString(a, b), stackString(stack)))
+fn raw_misapply_stack(stack: ExecuteStack, a: &Value, b: &Value) -> ! {
+	panic!("{}\n{}", misapply_string(a, b), stack_string(stack));
 }
 
-fn makeLazy<F>(table: TableValue, key: Value, func: F) -> Value
+fn make_lazy<F>(table: &mut TableValue, key: Value, func: F) -> Value
 where F: Fn() -> Value {
-	Value::BuiltinUnaryMethodValue (move |_| { /* Later maybe pass on this to func? */
+	Value::BuiltinUnaryMethod (move |_| { /* Later maybe pass on this to func? */
 		let result = func();
 		table.insert(key, result);
 		result
 	})
 }
 
-fn tableSetLazy<F>(table: TableValue, key: Value, func: F) -> Value
+fn table_set_lazy<F>(table: &mut TableValue, key: Value, func: F)
 where F: Fn() -> Value {
-	tableSet(table, key, makeLazy(table, key, func));
+	table.insert(key, make_lazy(table, key, func));
 }
 
+fn main() {}

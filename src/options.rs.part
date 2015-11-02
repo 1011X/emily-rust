@@ -1,58 +1,84 @@
 /* Parse and validate command line arguments. */
 
-static VERSION : &str = "0.2";
-static FULL_VERSION : &str = "Emily language interpreter: Version 0.2";
+// Arg
+// ArgPlus
 
-enum ExecutionTarget { Stdin, File(String), Literal(String) }
+#[macro_use]
+extern crate lazy_static;
 
-struct OptionSpec {
-    /* Execution args */
-    targets : Vec<ExecutionTarget>,
-    repl : bool,
-    step_macro : bool,
-    trace : bool,
-    track_objects : bool,
-    trace_set : bool,
-    package_path : Option<String>,
-    project_path : Option<String>,
-    dont_need_targets : bool, /* Set indirectly by several options */
+use arg_plus;
 
-    /* Things to do instead of execution */
-    disassemble : bool,
-    disassemble_verbose : bool,
-    print_package : bool,
-    print_project : bool,
-    print_version : bool,
-    print_machine_version : bool
+static VERSION : &'static str = "0.3b";
+
+lazy_static! {
+	static ref FULL_VERSION : String = format!("Emily language interpreter: Version {}", VERSION);
 }
 
-static mut run : OptionSpec = OptionSpec {
-    targets: Vec::new(),
-    repl: false,
-    step_macro: false, trace: false, track_objects: false, trace_set: false,
-    package_path: None, project_path: None,
-    disassemble: false, disassemble_verbose: false,
-    print_version: false, print_machine_version: false
-};
+enum ExecutionTarget {
+	Stdin,
+	File(String),
+	Literal(String)
+}
 
-/* Quarantined
-static key_mutate_argument    = arg_plus::key_mutate(|l| format!("--{}", l.connect("-")));
-static key_mutate_environment = arg_plus::key_mutate(|l|
-	format!("EMILY_{}", l.iter().map(|s| s.to_uppercase()).collect::<Vec<_>>().connect("_"))
-);
-)
-*/
+struct OptionSpec {
+	/* Execution args */
+	target : Option<ExecutionTarget>,
+	args : Vec<String>,
+	repl : bool,
+	step_macro : bool,
+	trace : bool,
+	track_objects : bool,
+	trace_set : bool,
+	package_path : Option<String>,
+	project_path : Option<String>,
+	dont_need_targets : bool, /* Set indirectly by several options */
 
-fn build_path_set_spec<F>(name, action: F, whatIs: String) -> (, Spec, String)
-	where F: Fn(String) {
-    (name, Spec::String(action), format!("Directory root for packages loaded from \"{}\"", whatIs))
+	/* Things to do instead of execution */
+	disassemble : bool,
+	disassemble_verbose : bool,
+	print_package : bool,
+	print_project : bool,
+	print_version : bool,
+	print_machine_version : bool
+}
+
+lazy_static! {
+	static ref RUN : OptionSpec = OptionSpec {
+		target: None,
+		args: vec![],
+		repl: false,
+		step_macro: false,
+		trace: false,
+		track_objects: false,
+		trace_set: false,
+		package_path: None,
+		project_path: None,
+		
+		disassemble: false,
+		disassemble_verbose: false,
+		print_package: false,
+		print_project: false,
+		print_version: false,
+		print_machine_version: false
+	};
+
+	static ref KEY_MUTATE_ARGUMENT = arg_plus::key_mutate(|l| format!("--{}", l.join("-")));
+	static ref KEY_MUTATE_ENVIRONMENT = arg_plus::key_mutate(|l|
+		format!("EMILY_{}", l.iter()
+			.map(|s| s.to_uppercase())
+			.collect::<Vec<_>>()
+			.join("_")
+		)
+	);
+}
+
+fn build_path_set_spec<F>(name: [&'static str; 2], action: F, whatIs: String) -> ([&'static str; 2], Spec, String)
+where F: Fn(String) {
+	(name, Spec::String(action), format!("Directory root for packages loaded from \"{}\"", whatIs))
 }
 
 fn init() {
-    let mut targets = vec![];
-    let mut seenStdin = false;
-
-    let usage = fullVersion.to_string() + "
+	let usage = *FULL_VERSION + "
 
 Sample usage:
     emily filename.em     # Execute program
@@ -69,88 +95,86 @@ else { "" } + "
 
 Options:";
 
-    let version_spec = |key|
-    	(key, Arg.Unit(|| run.print_version = true), "Print interpreter version");
+	let version_spec = |key|
+		(key, Arg.Unit(|| run.print_version = true), "Print interpreter version");
 
-    let executeArgs = vec![ /* Basic arguments */
-        ("-", Arg.Unit(|| /* Arg's parser means the magic - argument must be passed in this way. */
-            if !seenStdin {
-            	Err ("Attempted to parse stdin twice; that doesn't make sense?")
-            }
-            else {
-            	seenStdin = true;
-            	targets.push(ExecutionTarget::Stdin);
-            	Ok(())
-            }
-        ), ""), /* No summary, this shouldn't be listed with options. */
+	let mut executeArgs = vec![ /* Basic arguments */
+		("-", Arg.Unit(|| { /* Arg's parser means the magic - argument must be passed in this way. */
+			RUN.target = Some(ExecutionTarget::Stdin);
+			Err(arg_plus::Complete)
+		}), ""), /* No summary, this shouldn't be listed with options. */
 
-        /* Args */
-        ("-e", Arg.String(|f| {
-            targets.push(ExecutionTarget::Literal (f));
-            Ok(())
-        }), "Execute code inline")
-    ];
-    
-    if cfg!(BUILD_INCLUDE_REPL) {
+		/* Args */
+		("-e", Arg.String(|f| {
+			RUN.target = Some(ExecutionTarget::Literal (f));
+			Err(ArgPlus.Complete)
+		}), "Execute code inline")
+	];
+	
+	if cfg!(BUILD_INCLUDE_REPL) {
 		executeArgs.push(
-		    ("-i", Arg.Unit(|f| {
-		        run.repl = true;
-		        /* targets.push(ExecutionTarget::Repl); */
-		        Ok(())
-		    }), "Enter interactive mode (REPL)")
+			("-i", Arg.Unit(|f| {
+				RUN.repl = true;
+				RUN.dont_need_targets = true;
+			}), "Enter interactive mode (REPL)")
 		);
 	}
 	
 	executeArgs.push_all(&[
-	    version_spec("-v"),
-	    version_spec("--version"),
+		version_spec("-v"),
+		version_spec("--version"),
 
-	    ("--machine-version", Arg.Unit(|| {
-	    	run.print_machine_version = true;
-	    	Ok(())
-	    }), "Print interpreter version (machine-readable-- number only)")
+		("--machine-version", Arg.Unit(|| {
+			RUN.print_machine_version = true;
+		}), "Print interpreter version (number only) and quit")
 	]);
 
-    let environment_args = vec![ /* "Config" arguments which can be also set with env vars */
-        build_path_set_spec(["package", "path"], |a| run.package_path = Some (a), "package"),
-        build_path_set_spec(["project", "path"], |a| run.project_path = Some (a), "project")
-    ];
+	let environment_args = vec![ /* "Config" arguments which can be also set with env vars */
+		build_path_set_spec(["package", "path"], |a| RUN.package_path = Some (a), "package"),
+		build_path_set_spec(["project", "path"], |a| RUN.project_path = Some (a), "project")
+	];
+	
+	let debug_args = vec![ /* For supporting Emily development itself-- separate out to sort last in help */
+		("--debug-dis", Arg.Unit(|| RUN.disassemble = true), "Print \"disassembled\" code and exit"),
+		("--debug-disv", Arg.Unit(|| RUN.disassemble_verbose = true), "Print \"disassembled\" code with position data and exit"),
+		("--debug-macro", Arg.Unit(|| RUN.step_macro = true), "Print results of each individual macro evaluation"),
+		("--debug-trace", Arg.Unit(|| RUN.trace = true), "When executing, print interpreter state"),
+		("--debug-track", Arg.Unit(|| RUN.track_objects = true), "When executing, give all objects a unique \"!id\" member"),
+		("--debug-set", Arg.Unit(|| RUN.trace_set = true), "When executing, print object contents on each set"),
+		("--debug-run", Arg.Unit(|| {
+			RUN.trace = true;
+			RUN.track_objects = true;
+			RUN.trace_set = true;
+		}),  "When executing, set all runtime trace type options")
+	];
 
-    let debug_args = vec![ /* For supporting Emily development itself-- separate out to sort last in help */
-        ("--debug-dis", Arg.Unit(|| run.disassemble = true), "Print \"disassembled\" code and exit"),
-        ("--debug-disv", Arg.Unit(|| run.disassemble_verbose = true), "Print \"disassembled\" code with position data and exit"),
-        ("--debug-macro", Arg.Unit(|| run.step_macro = true), "Print results of each individual macro evaluation"),
-        ("--debug-trace", Arg.Unit(|| run.trace = true), "When executing, print interpreter state"),
-        ("--debug-track", Arg.Unit(|| run.track_objects = true), "When executing, give all objects a unique \"!id\" member"),
-        ("--debug-set", Arg.Unit(|| run.trace_set = true), "When executing, print object contents on each set"),
-        ("--debug-run", Arg.Unit(|| {
-            run.trace = true;
-            run.track_objects = true;
-            run.trace_set = true;
-        }),  "When executing, set all runtime trace type options")
-    ];
+	let args = {
+		let c = executeArgs.clone();
+		c.push_all(*key_mutate_argument(environmentArgs));
+		c.push_all(*debugArgs);
+	};
 
-    let args = 
-    	executeArgs @ key_mutate_argument(environmentArgs) @ debugArgs;
+	let targetParse = |t| {
+		RUN.target = ExecutionTarget::File (t);
+		Err(ArgPlus.Complete)
+	};
 
-    let targetParse = |t| targets.push(ExecutionTarget::File (t));
-
-    ArgPlus.envParse(key_mutate_environment(environmentArgs));
-    ArgPlus.argParse(args, targetParse, usage, |_|
-        /* Arguments are parsed; either short-circuit with an informational message, or store targets */
-        if run.print_machine_version {
-        	println!(version);
-        }
-        else if run.print_version {
-        	println!(fullVersion);
-        }
-        else {
-            run.targets.reverse();
-            if !run.dont_need_targets {
-            	if run.targets == [] {
-		            return Err (ArgPlus.Help 1) /* No targets! Fail and print help. */
-		        }
-		    }
-        }
-    );
+	ArgPlus.envParse(key_mutate_environment(environmentArgs));
+	ArgPlus.argParse(args, targetParse, usage, |progArgs|
+		/* Arguments are parsed; either short-circuit with an informational message, or store targets */
+		if RUN.print_machine_version {
+			println!(VERSION);
+		}
+		else if RUN.print_version {
+			println!(FULL_VERSION);
+		}
+		else {
+			RUN.args = progArgs;
+			if !RUN.dont_need_targets {
+				if let None = RUN.target {
+					Err (ArgPlus.Help 1) /* No targets! Fail and print help. */
+				}
+			}
+		}
+	);
 }

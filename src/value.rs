@@ -1,24 +1,27 @@
 /* Data representation for a runtime value. */
 
+#[macro_use]
+extern crate lazy_static;
+
 use std::collections::HashMap;
 use std::hash::Hasher;
 use token;
 
 pub type TableValue = HashMap<Value, Value>;
 
+pub struct ClosureExecUser {
+	body       : token::CodeSequence,
+	scoped     : bool,  /* Should the closure execution get its own let scope? */
+	env_scope  : Box<Value>, /* Captured scope environment of closure manufacture */
+	/* Another option would be to make the "new" scope early & excise 'key': */
+	key        : Vec<String>, /* Not-yet-curried keys, or [] as special for "this is nullary" -- BACKWARD, first-applied key is last */
+	has_return : bool    /* Should the closure execution get its own "return" continuation? */
+}
+
 /* Closure types: */
 #[derive(Clone)]
 pub enum ClosureExec {
-	// XXX: ClosureExecUser, struct ClosureExecUser
-	User {
-		body       : token::CodeSequence,
-		scoped     : bool,  /* Should the closure execution get its own let scope? */
-		env_scope  : Box<Value>, /* Captured scope environment of closure manufacture */
-		/* Another option would be to make the "new" scope early & excise 'key': */
-		key        : Vec<String>, /* Not-yet-curried keys, or [] as special for "this is nullary" -- BACKWARD, first-applied key is last */
-		has_return : bool    /* Should the closure execution get its own "return" continuation? */
-	},
-	// XXX: ClosureExecBuiltin
+	User(ClosureExecUser),
 	Builtin(Box<Fn(Vec<Value>) -> Value>)
 }
 
@@ -28,6 +31,13 @@ pub enum ClosureThis {
 	Never,     /* Closure is not a method and should not receive a this. */
 	Current(Box<Value>, Box<Value>), /* Closure is a method, has a provisional current/this. */
 	Frozen(Box<Value>, Box<Value>)  /* Closure is a method, has a final, assigned current/this. */
+}
+
+pub struct ClosureValue {
+	exec       : ClosureExec,
+	need_args  : usize,       /* Count this down as more values are added to bound */
+	bound      : Vec<Value>,  /* Already-curried values -- BACKWARD, first application last */
+	this       : ClosureThis  /* Tracks the "current" and "this" bindings */
 }
 
 #[derive(Clone, Eq)]
@@ -48,12 +58,7 @@ pub enum Value {
     /* Complex user-created values */
     
 	/* Is this getting kind of complicated? Should curry be wrapped closures? Should callcc be separate? */
-	Closure {
-		exec       : ClosureExec,
-		need_args  : usize,      /* Count this down as more values are added to bound */
-		bound      : Vec<Value>,   /* Already-curried values -- BACKWARD, first application last */
-		this       : ClosureThis   /* Tracks the "current" and "this" bindings */
-	},
+	Closure (ClosureValue),
 	UserMethod (Box<Value>),
 	Table (Box<TableValue>),
 	Object (Box<TableValue>), /* Same as Value::Table but treats 'this' different */
@@ -128,39 +133,41 @@ pub enum TableBoxKind {
 pub static mut ID_GENERATOR : f64 = 0.0;
 
 /* "Keywords" */
-pub static HAS_KEY_STRING       : &'static str = "has";
-pub static HAS_KEY              : Value        = Value::Atom (HAS_KEY_STRING);
-pub static SET_KEY_STRING       : &'static str = "set";
-pub static SET_KEY              : Value        = Value::Atom (SET_KEY_STRING);
-pub static LET_KEY_STRING       : &'static str = "let";
-pub static LET_KEY              : Value        = Value::Atom (LET_KEY_STRING);
-pub static PARENT_KEY_STRING    : &'static str = "parent";
-pub static PARENT_KEY           : Value        = Value::Atom (PARENT_KEY_STRING);
-pub static ID_KEY_STRING        : &'static str = "!id";
-pub static ID_KEY               : Value        = Value::Atom (ID_KEY_STRING);
-pub static CURRENT_KEY_STRING   : &'static str = "current";
-pub static CURRENT_KEY          : Value        = Value::Atom (CURRENT_KEY_STRING);
-pub static THIS_KEY_STRING      : &'static str = "this";
-pub static THIS_KEY             : Value        = Value::Atom (THIS_KEY_STRING);
-pub static SUPER_KEY_STRING     : &'static str = "super";
-pub static SUPER_KEY            : Value        = Value::Atom (SUPER_KEY_STRING);
-pub static RETURN_KEY_STRING    : &'static str = "return";
-pub static RETURN_KEY           : Value        = Value::Atom (RETURN_KEY_STRING);
-pub static PACKAGE_KEY_STRING   : &'static str = "package";
-pub static PACKAGE_KEY          : Value        = Value::Atom (PACKAGE_KEY_STRING);
-pub static PROJECT_KEY_STRING   : &'static str = "project";
-pub static PROJECT_KEY          : Value        = Value::Atom (PROJECT_KEY_STRING);
-pub static DIRECTORY_KEY_STRING : &'static str = "directory";
-pub static DIRECTORY_KEY        : Value        = Value::Atom (DIRECTORY_KEY_STRING);
-pub static INTERNAL_KEY_STRING  : &'static str = "internal";
-pub static INTERNAL_KEY         : Value        = Value::Atom (INTERNAL_KEY_STRING);
-pub static NONLOCAL_KEY_STRING  : &'static str = "nonlocal";
-pub static NONLOCAL_KEY         : Value        = Value::Atom (NONLOCAL_KEY_STRING);
-pub static PRIVATE_KEY_STRING   : &'static str = "private";
-pub static PRIVATE_KEY          : Value        = Value::Atom (PRIVATE_KEY_STRING);
-pub static EXPORT_LET_KEY_STRING: &'static str = "exportLet";
-pub static EXPORT_LET_KEY       : Value        = Value::Atom (EXPORT_LET_KEY_STRING);
+pub static HAS_KEY_STRING        : &'static str = "has";
+pub static SET_KEY_STRING        : &'static str = "set";
+pub static LET_KEY_STRING        : &'static str = "let";
+pub static PARENT_KEY_STRING     : &'static str = "parent";
+pub static ID_KEY_STRING         : &'static str = "!id";
+pub static CURRENT_KEY_STRING    : &'static str = "current";
+pub static THIS_KEY_STRING       : &'static str = "this";
+pub static SUPER_KEY_STRING      : &'static str = "super";
+pub static RETURN_KEY_STRING     : &'static str = "return";
+pub static PACKAGE_KEY_STRING    : &'static str = "package";
+pub static PROJECT_KEY_STRING    : &'static str = "project";
+pub static DIRECTORY_KEY_STRING  : &'static str = "directory";
+pub static INTERNAL_KEY_STRING   : &'static str = "internal";
+pub static NONLOCAL_KEY_STRING   : &'static str = "nonlocal";
+pub static PRIVATE_KEY_STRING    : &'static str = "private";
+pub static EXPORT_LET_KEY_STRING : &'static str = "exportLet";
 
+lazy_static! {
+	pub static ref HAS_KEY        : Value = Value::Atom (HAS_KEY_STRING.to_string());
+	pub static ref SET_KEY        : Value = Value::Atom (SET_KEY_STRING.to_string());
+	pub static ref LET_KEY        : Value = Value::Atom (LET_KEY_STRING.to_string());
+	pub static ref PARENT_KEY     : Value = Value::Atom (PARENT_KEY_STRING.to_string());
+	pub static ref ID_KEY         : Value = Value::Atom (ID_KEY_STRING.to_string());
+	pub static ref CURRENT_KEY    : Value = Value::Atom (CURRENT_KEY_STRING.to_string());
+	pub static ref THIS_KEY       : Value = Value::Atom (THIS_KEY_STRING.to_string());
+	pub static ref SUPER_KEY      : Value = Value::Atom (SUPER_KEY_STRING.to_string());
+	pub static ref RETURN_KEY     : Value = Value::Atom (RETURN_KEY_STRING.to_string());
+	pub static ref PACKAGE_KEY    : Value = Value::Atom (PACKAGE_KEY_STRING.to_string());
+	pub static ref PROJECT_KEY    : Value = Value::Atom (PROJECT_KEY_STRING.to_string());
+	pub static ref DIRECTORY_KEY  : Value = Value::Atom (DIRECTORY_KEY_STRING.to_string());
+	pub static ref INTERNAL_KEY   : Value = Value::Atom (INTERNAL_KEY_STRING.to_string());
+	pub static ref NONLOCAL_KEY   : Value = Value::Atom (NONLOCAL_KEY_STRING.to_string());
+	pub static ref PRIVATE_KEY    : Value = Value::Atom (PRIVATE_KEY_STRING.to_string());
+	pub static ref EXPORT_LET_KEY : Value = Value::Atom (EXPORT_LET_KEY_STRING.to_string());
+}
 
 // Really needed?
 pub fn table_get(table: &TableValue, key: &Value) -> Option<Value> {
@@ -180,13 +187,14 @@ pub fn table_set_string(table: &mut TableValue, key: String, value: Value) {
 }
 
 pub fn table_set_option(table: &mut TableValue, key: Value, value: Option<Value>) {
-	if let Some(ref x) = value { table.insert(key, x.clone()); }
+	if let Some(ref x) = value {
+		table.insert(key, x.clone());
+	}
 }
 
-pub fn table_from(value: Value) -> Result<TableValue, &'static str> {
+pub fn table_from(value: Value) -> TableValue {
 	match value {
-		Value::TableValue(v) |
-		Value::ObjectValue(v) => Ok(v),
-		_ => Err("Internal error-- interpreter accidentally treated a non-object as an object in a place this should have been impossible.")
+		Value::Table (v) | Value::Object (v) => Ok(v),
+		_ => panic!("Internal error-- interpreter accidentally treated a non-object as an object in a place this should have been impossible.")
 	}
 }

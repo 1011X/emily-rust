@@ -152,15 +152,15 @@ pub enum TokenFailureKind {
 
 pub struct CompilationError (TokenFailureKind, CodePosition, String);
 
-pub fn incomplete_at(at: &CodePosition, mesg: String) -> Result<(), CompilationError> {
-	Err (CompilationError (TokenFailureKind::IncompleteError, at.clone(), mesg))
+pub fn incomplete_at(at: &CodePosition, mesg: String) -> ! {
+	panic!("{}", error_string(CompilationError (TokenFailureKind::IncompleteError, at.clone(), mesg)));
 }
 
-pub fn fail_at(at: &CodePosition, mesg: String) -> Result<(), CompilationError> {
-	Err (CompilationError (TokenFailureKind::InvalidError, at.clone(), mesg))
+pub fn fail_at(at: &CodePosition, mesg: String) -> ! {
+	panic!("{}", error_string(CompilationError (TokenFailureKind::InvalidError, at.clone(), mesg)));
 }
 
-pub fn fail_token(at: &Token, mesg: String) -> Result<(), CompilationError> {
+pub fn fail_token(at: &Token, mesg: String) -> ! {
 	fail_at(&at.at, mesg)
 }
 
