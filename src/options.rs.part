@@ -96,7 +96,7 @@ else { "" } + "
 Options:";
 
 	let version_spec = |key|
-		(key, Arg.Unit(|| run.print_version = true), "Print interpreter version");
+		(key, Arg.Unit(|| RUN.print_version = true), "Print interpreter version");
 
 	let mut executeArgs = vec![ /* Basic arguments */
 		("-", Arg.Unit(|| { /* Arg's parser means the magic - argument must be passed in this way. */
