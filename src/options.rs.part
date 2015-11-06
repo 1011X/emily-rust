@@ -94,6 +94,18 @@ Sample usage:
 else { "" } + "
 
 Options:";
+	
+	/*
+	// possible replacement for handling arguments:
+	
+	opts.optflag("", "", ""); // for magic "-" argument
+	opts.optopt("e", "", "Execute code inline", "\"println 3\"");
+	if cfg!(BUILD_INCLUDE_REPL) {
+		opts.optflagopt("i", "", "Enter interactive mode (REPL)", "filename.em");
+	}
+	opts.optflag("v", "version", "Print interpreter version");
+	opts.optflag("", "machine-version", "Print interpreter version (number only) and quit");
+	*/
 
 	let version_spec = |key|
 		(key, Arg.Unit(|| RUN.print_version = true), "Print interpreter version");
