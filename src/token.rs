@@ -1,4 +1,6 @@
 /* Data representation for an AST. */
+use CodeSource::*;
+use TokenFailureKind::*;
 
 /* Records the original source file of a token */
 #[derive(Clone)]
@@ -21,17 +23,18 @@ pub struct CodePosition {
 /* Make CodePosition.file_name human-readable */
 pub fn file_name_string(n: &CodeSource) -> String {
 	match *n {
-		CodeSource::Stdin => "<input>".to_string(),
-		CodeSource::Cmdline => "<commandline>".to_string(),
-		CodeSource::Unknown => "<unknown>".to_string(),
-		CodeSource::Internal (ref s) => format!("<internal:{}>", s),
-		CodeSource::File (ref s) => format!("'{}'", s)
+		Stdin => "<input>".to_string(),
+		Cmdline => "<commandline>".to_string(),
+		Unknown => "<unknown>".to_string(),
+		Internal (ref s) => format!("<internal:{}>", s),
+		File (ref s) => format!("'{}'", s)
 	}
 }
 
 /* Make CodePosition human-readable */
 pub fn position_string(p: &CodePosition) -> String {
-	format!("[{} line {} ch {}]", file_name_string(&p.file_name), p.line_number, p.line_offset)
+	format!("[{} line {} ch {}]",
+	file_name_string(&p.file_name), p.line_number, p.line_offset)
 }
 
 /* If the group is boxed, what is returned from it? */
@@ -49,7 +52,7 @@ pub enum TokenGroupKind {
 /* Is this group a closure? What kind? */
 #[derive(Clone)]
 pub enum TokenClosureKind {
-	NonClosure,                              /* Is not a function */
+	NonClosure,                               /* Is not a function */
 	ClosureWithBinding (Vec<(bool, String)>)  /* Function with argument-- arg is return?,args */
 }
 
@@ -57,6 +60,14 @@ pub enum TokenClosureKind {
 /* A CodeSequence is a list of lines. A line is a list of tokens. */
 /* A Token may be a group with its own CodeSequence. */
 pub type CodeSequence = Vec<Vec<Token>>;
+
+#[derive(Clone)]
+pub struct TokenGroup {
+	kind : TokenGroupKind,      /* Group kind */
+	closure : TokenClosureKind,  /* Closure kind, if any */
+	group_initializer : Vec<Token>,    /* Used to create scope */
+	items : CodeSequence /* Group is a list of lines, lines are a list of tokens */
+}
 
 /* Data content of a token */
 #[derive(Clone)]
@@ -66,15 +77,7 @@ pub enum TokenContents {
 	String (String), /* "Quoted" */
 	Atom (String),   /* Ideally appears post-macro only */
 	Number (f64),
-	
-	/* Data content of a group-type token */
-	// XXX: TokenGroup
-	Group {
-		kind : TokenGroupKind,      /* Group kind */
-		closure : TokenClosureKind,  /* Closure kind, if any */
-		group_initializer : Vec<Token>,    /* Used to create scope */
-		items : CodeSequence /* Group is a list of lines, lines are a list of tokens */
-	}
+	Group (TokenGroup)
 }
 
 /* A token. Effectively, an AST node. */
@@ -94,12 +97,12 @@ pub fn make_token(position: &CodePosition, contents: &TokenContents) -> Token {
 
 /* Quick constructor for token, group type */
 pub fn make_group(position: &CodePosition, closure: &TokenClosureKind, kind: &TokenGroupKind, group_initializer: &Vec<Token>, items: &CodeSequence) -> Token {
-    make_token(position, &TokenContents::Group {
+    make_token(position, &TokenContents::Group (TokenGroup {
     	kind: kind.clone(),
     	closure: closure.clone(),
     	group_initializer: group_initializer.clone(),
     	items: items.clone()
-    })
+    }))
 }
 
 pub fn clone(token: &Token, contents: &TokenContents) -> Token {
@@ -110,7 +113,7 @@ pub fn clone_group(token: &Token, closure: &TokenClosureKind, kind: &TokenGroupK
 	make_group(&token.at, closure, kind, initializer, items)
 }
 
-/* Focus on getting stuff working first, then worry about Rust-ing it
+/*
 impl Token {
 	// Quick constructor for Token
 	// XXX: make_token
@@ -152,18 +155,18 @@ pub enum TokenFailureKind {
 
 pub struct CompilationError (TokenFailureKind, CodePosition, String);
 
-pub fn incomplete_at(at: &CodePosition, mesg: String) -> ! {
-	panic!("{}", error_string(CompilationError (TokenFailureKind::IncompleteError, at.clone(), mesg)));
+pub fn incomplete_at(at: &CodePosition, mesg: &String) -> Result<(), CompilationError> {
+	Err(CompilationError (IncompleteError, at.clone(), mesg.clone()))
 }
 
-pub fn fail_at(at: &CodePosition, mesg: String) -> ! {
-	panic!("{}", error_string(CompilationError (TokenFailureKind::InvalidError, at.clone(), mesg)));
+pub fn fail_at(at: &CodePosition, mesg: &String) -> Result<(), CompilationError> {
+	Err(CompilationError (InvalidError, at.clone(), mesg.clone()))
 }
 
-pub fn fail_token(at: &Token, mesg: String) -> ! {
-	fail_at(&at.at, mesg)
+pub fn fail_token(at: &Token, mesg: &String) -> Result<(), CompilationError> {
+	fail_at(&at.at, &mesg)
 }
 
-pub fn error_string(CompilationError (_, ref at, ref mesg): CompilationError) -> String {
+pub fn error_string(&CompilationError (_, ref at, ref mesg): &CompilationError) -> String {
 	format!("Fatal error: {} {}", mesg, position_string(at))
 }
