@@ -1,5 +1,8 @@
 /* Macro processing */
 
+#[macro_use]
+extern crate lazy_static;
+
 use std::collections::HashMap;
 use token;
 
@@ -9,19 +12,18 @@ use token::{
     TokenGroupKind
 };
 
-fn fail_at(at: &CodePosition, mesg: String) -> Result<(), token::CompilationError> {
+pub fn fail_at(at: &CodePosition, mesg: String) -> Result<(), token::CompilationError> {
     Err (token::CompilationError (Token.MacroError, at, mesg))
 }
-fn fail_token(at: &Token, mesg: String) -> Result<(), token::CompilationError> {
+pub fn fail_token(at: &Token, mesg: String) -> Result<(), token::CompilationError> {
     fail_at(&at.at, mesg)
 }
 
 /* Last thing we always do is make sure no symbols survive after macro processing. */
-fn verify_symbols(l: Vec<Token>) -> Vec<Token> {
-    // possible destructuring on lhs of for?
-    for token in l {
-        if let Token {contents: TokenContents::Symbol(s), at} = token {
-            token::fail_at(at, format!("Unrecognized symbol {}", s)),
+pub fn verify_symbols(l: SingleLine) -> SingleLine {
+    for token in l.iter() {
+        if let &Token {contents: TokenContents::Symbol(ref s), ref at} = token {
+            token::fail_at(at, format!("Unrecognized symbol {}", s));
         }
     }
     l
@@ -29,7 +31,7 @@ fn verify_symbols(l: Vec<Token>) -> Vec<Token> {
 
 /* Types for macro processing. */
 
-enum MacroPriority { L (f64), R (f64) } /* See builtinMacros comment /*
+enum MacroPriority { L (f64), R (f64) } /* See builtinMacros comment */
 
 type SingleLine = Vec<Token>;
 
@@ -39,12 +41,12 @@ type SingleLine = Vec<Token>;
     "future" (tokens ahead of cursor). A macro replaces all 3 with a new line. */
 type MacroFunction = Fn(SingleLine, Token, SingleLine) -> SingleLine;
 
-struct MacroSpec  = {
+struct MacroSpec {
     priority : MacroPriority,
-    specFunction : Box<MacroFunction>
+    spec_function : Box<MacroFunction>
 }
 
-struct MacroMatch = {
+struct MacroMatch {
     matchFunction: Box<MacroFunction>,
     past : SingleLine,
     present : token::Token,
@@ -52,115 +54,155 @@ struct MacroMatch = {
 }
 
 /* The set of loaded macros lives here. */
-static mut MACRO_TABLE = HashMap::with_capacity(1);
+lazy_static! {
+	pub static ref mut MACRO_TABLE = HashMap::with_capacity(1);
+}
 
 /* All manufactured tokens should be made through clone, so that position information is retained */
-fn clone_atom(at: CodePosition, s: String) -> Token {
+pub fn clone_atom(at: CodePosition, s: String) -> Token {
     token::clone(at, TokenContents::Atom (s))
 }
 
-fn clone_word(at: CodePosition, s: String) -> Token {
+pub fn clone_word(at: CodePosition, s: String) -> Token {
     token::clone(at, TokenContents::Word (s))
 }
 
-fn clone_group(at: CodePosition) -> Token {
+pub fn clone_group(at: &CodePosition) -> Token {
     token::clone_group(at, TokenClosureKind::NonClosure, TokenGroupKind::Plain, vec![])
 }
 
 /* Note: makes no-return closures */
-fn clone_closure(at) -> {
+pub fn clone_closure(at: &CodePosition) -> Token {
     token::clone_group(at, TokenClosureKind::ClosureWithBinding (false, vec![]), TokenGroupKind::Plain, vec![])
 }
 
 /* Debug method gets to use this. */
-static NULL_TOKEN : Token = token::make_token(
-    CodePosition {
-        file_name: Unknown,
-        line_number: 0,
-        line_offset: 0
-    },
-    TokenContents::Symbol ("_")
-);
+lazy_static! {
+	pub static ref NULL_TOKEN : Token = token::make_token(
+		CodePosition {
+		    file_name: CodeSource::Unknown,
+		    line_number: 0,
+		    line_offset: 0
+		},
+		TokenContents::Symbol ("_")
+	);
+}
 
 /* Macro processing, based on whatever builtinMacros contains */
-let rec process l =
-    if Options.(run.stepMacro) then print_endline @@ Pretty.dumpCodeTreeTerse @@ cloneGroup nullToken [l];
+pub fn process(l: SingleLine) -> SingleLine {
+    if options::RUN.step_macro {
+    	println!(pretty::dump_code_tree_terse(clone_group(NULL_TOKEN, [l])));
+    }
 
-    (* Search for macro to process next. Priority None/line None means none known yet. *)
-    let rec findIdeal (bestPriority:macroPriority option) bestLine (past:singleLine) present future : macroMatch option =
-        (* Iterate cursor *)
-        let proceed priority line =
-            match future with
-                (* Future is empty, so future has iterated to end of line *)
-                | [] -> line
+    /* Search for macro to process next. Priority None/line None means none known yet. */
+    fn find_ideal(best_priority: Option<MacroPriority>, best_line, past: SingleLine, present, future) -> Option<MacroMatch> {
+        /* Iterate cursor */
+        let proceed = |priority, line| match &*future {
+            /* Future is empty, so future has iterated to end of line */
+            [] => line,
 
-                (* Future is nonempty, so move the cursor forward. *)
-                | nextToken :: nextFuture -> findIdeal priority line (present::past) nextToken nextFuture
+            /* Future is nonempty, so move the cursor forward. */
+            [next_future.., next_token] => find_ideal(priority, line, {
+            	let mut v = past.clone();
+            	v.push(present);
+            	v
+            }, next_token, next_future),
+        };
 
-        (* Iterate cursor leaving priority and line unchanged *)
-        in let skip() =
-            proceed bestPriority bestLine
+        /* Iterate cursor leaving priority and line unchanged */
+        let skip = || proceed(best_priority, best_line);
 
-        (* Investigate token under cursor *)
-        in match present.Token.contents with
-            (* Words or symbols can currently be triggers for macros. *)
-            | Token.Word s | Token.Symbol s ->
-                (* Is the current word/symbol a thing in the macro table? *)
-                let v = CCHashtbl.get macroTable s in
-                (match v with
-                    (* It's in the table; now to decide if it's an ideal match. *)
-                    | Some {priority;specFunction} ->
-                        (* True if this macro is better fit than the current candidate. *)
-                        let better = (match bestPriority,priority with
-                            (* No matches yet, automatic win. *)
-                            | None,_ -> true
+        /* Investigate token under cursor */
+        match present.contents {
+            /* Words or symbols can currently be triggers for macros. */
+            TokenContents::Word (s) | TokenContents::Symbol (s) =>
+                /* Is the current word/symbol a thing in the macro table? */
+                let v = macro_table.get(s).cloned();
+                match v {
+                    /* It's in the table; now to decide if it's an ideal match. */
+                    Some (MacroSpec {priority, spec_function}) => {
+                        /* True if this macro is better fit than the current candidate. */
+                        let better = match (best_priority, priority) {
+                            /* No matches yet, automatic win. */
+                            (None, _) => true,
 
-                            (* If associativity varies, we can determine winner based on that alone: *)
-                            (* Prefer higher priority, but break ties toward left-first macros over right-first ones. *)
-                            | Some L(left),R(right) -> left < right
-                            | Some R(left),L(right) -> left <= right
+                            /* If associativity varies, we can determine winner based on that alone: */
+                            /* Prefer higher priority, but break ties toward left-first macros over right-first ones. */
+                            (Some L(left), R(right)) => left < right,
+                            (Some R(left), L(right)) => left <= right,
 
-                            (* "Process leftmost first": Prefer higher priority, break ties to the left. *)
-                            | Some L(left),L(right) -> left < right
+                            /* "Process leftmost first": Prefer higher priority, break ties to the left. */
+                            (Some L(left), L(right)) => left < right,
 
-                            (* "Process rightmost first": Prefer higher priority, break ties to the right. *)
-                            | Some R(left),R(right) -> left <= right
-                        ) in
-                        if better then
-                            proceed (Some priority) (Some {past; present; future; matchFunction=specFunction})
+                            /* "Process rightmost first": Prefer higher priority, break ties to the right. */
+                            (Some R(left), R(right)) => left <= right,
+                        };
+                        
+                        if better {
+                            proceed(Some (priority), Some (MacroMatch {
+                            	past: past,
+                            	present: present,
+                            	future: future,
+                            	match_function: spec_function
+                            }));
+                        }
+                        /* It's a worse match than the current best guess. */
+                        else {
+                        	skip();
+                    	}
+                    }
+                    /* It's not in the table. */
+                    _ => skip(),
+                }
+            /* It's not even a candidate to trigger a macro. */
+            _ => skip(),
+        }
+    }
 
-                        (* It's a worse match than the current best guess. *)
-                        else skip()
-                    (* It's not in the table. *)
-                    | _ -> skip() )
-            (* It's not even a candidate to trigger a macro. *)
-            | _ -> skip()
+    /* Actually process macro */
+    match &*l {
+        /* Special case: Line is empty, do nothing. */
+        l @ [] => l,
 
-    (* Actually process macro *)
-    in match l with
-        (* Special case: Line is empty, do nothing. *)
-        | [] -> l
+        /* Split out first item to use as the find_ideal "present" cursor. */
+        [future.., present] =>
+            /* Repeatedly run find_ideal until there are no more macros in the line. */
+            match find_ideal(None, None, vec![], present, future) {
+                /* No macros triggered! Sanitize the line and return it. */
+                None => verify_symbols(l),
 
-        (* Split out first item to use as the findideal "present" cursor. *)
-        | present::future ->
-            (* Repeatedly run findIdeal until there are no more macros in the line. *)
-            (match findIdeal None None [] present future with
-                (* No macros triggered! Sanitize the line and return it. *)
-                | None -> verifySymbols l
+                /* A macro was found. Run the macro, then re-process the adjusted line. */
+                Some (MacroMatch {matchFunction; past; present; future}) => {
+                    if options::RUN.step_macro {
+                    	println!("    ...becomes:");
+                    }
+                    process(match_function(past, present, future))
+                }
+            },
+	}
+}
 
-                (* A macro was found. Run the macro, then re-process the adjusted line. *)
-                | Some {matchFunction; past; present; future} ->
-                    if Options.(run.stepMacro) then print_endline @@ "    ...becomes:";
-                    process (matchFunction past present future) )
+/* The macros themselves */
 
-(* The macros themselves *)
+/* Support functions for macros */
 
-(* Support functions for macros *)
+pub fn new_future(at: &CodePosition, f: SingleLine) -> Token {
+	clone_group(at, vec![process(f)]) /* Insert a forward-time group */
+}
 
-let newFuture at f        = cloneGroup at [process f]        (* Insert a forward-time group *)
-let newPast at p          = newFuture at (List.rev p)        (* Insert a reverse-time group *)
-let newFutureClosure at f = cloneClosure at [process f]      (* Insert a forward-time closure *)
-let newPastClosure at p   = newFutureClosure at (List.rev p) (* Insert a reverse-time closure *)
+pub fn new_past(at: &CodePosition, p: SingleLine) -> Token {
+	new_future(at, {              /* Insert a reverse-time group */
+		let mut v = p.clone();
+		v.reverse();
+		v
+	})
+}
+
+pub fn new_future_closure(at: &CodePosition, f: SingleLine) -> Token {
+	clone_closure(at, vec![process(f)])      /* Insert a forward-time closure */
+}
+
+pub fn newPastClosure at p   = newFutureClosure at (List.rev p) (* Insert a reverse-time closure *)
 
 (* A recurring pattern in the current macros is to insert a new single token
    into "the middle" of an established past and future *)

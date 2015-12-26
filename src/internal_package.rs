@@ -1,12 +1,18 @@
+#![feature(slice_patterns)]
+
 use std::sync::{
 	Once,
 	ONCE_INIT
 };
 
+use value;
+use value_util;
+
 use value::{
 	TableBlankKind,
 	Value
 };
+use value_util::TableType;
 
 fn table_pair() -> (TableType, Value) {
 	let table = value_util::table_blank(TableBlankKind::NoSet);
@@ -15,19 +21,20 @@ fn table_pair() -> (TableType, Value) {
 }
 
 /* Sign-of-divisor modulus */
-fn modulus(a, b) -> {
-	mod_float(mod_float(a, b) + b, b)
+fn modulus(a: f64, b: f64) -> f64 {
+	(a % b + b) % b
 }
 
 lazy_static! {
 	pub static ref TRUEFN_VALUE : Value = Value::BuiltinFunction (|x| Value::True);
 	
-	pub static (ref INTERNAL_TABLE, ref INTERNAL_VALUE) = tablePair();
+	pub static ref INTERNAL_TABLE : TableType = value_util::table_blank(TableBlankKind::NoSet);
+	pub static ref INTERNAL_VALUE : Value = Value::Table (INTERNAL_TABLE);
 }
 
-fn fake_register_location(name: String) -> CodePosition {
+fn fake_register_location(name: &'static str) -> CodePosition {
 	CodePosition {
-		file_name: CodeSource::Internal(name),
+		file_name: CodeSource::Internal (name),
 		line_number: 0,
 		line_offset: 0
 	}
@@ -44,201 +51,206 @@ fn fake_register_from(reg: RegisterState) -> ExecuteFrame {
 static START : Once = ONCE_INIT;
 
 START.call_once(|| {
-	let setAtomValue   ?target:(table=internalTable) name v = Value.tableSet table (Value.AtomValue name) v in
-	let setAtomFn	  ?target:(table=internalTable) n fn = setAtomValue ~target:table n (Value.BuiltinFunctionValue fn) in
-	/* let setAtomHandoff ?target:(table=internalTable) n fn = setAtomValue ~target:table n (Value.BuiltinHandoffValue fn) in */
-	let setAtomBinary  ?target:(table=internalTable) n fn = setAtomValue ~target:table n @@ ValueUtil.snippetClosure 2 (function
-		| [a;b] -> fn a b
-		| _ -> ValueUtil.impossibleArg "<builtin-pair>") in
-	let insertTable ?target:(table=internalTable) n =
-		let subTable,subValue = tablePair() in
-		setAtomValue ~target:table n subValue;
-		subTable
-	in
+	let set_atom_value = |table, name, v| Value::table_set(table.unwrap_or(INTERNAL_TABLE), Value::Atom (name), v);
+	let set_atom_fn = |table, n, func| set_atom_value(table, n, Value::BuiltinFunction (func));
+	/* let set_atom_handoff = |table, n, func| set_atom_value(table, n, Value::BuiltinHandoff (func));*/
+	let set_atom_binary = |table, n, func| set_atom_value(table, n, value_util::snippet_closure(2, |x| match &*x {
+		[a, b] => func(a, b),
+		_ => value_util::impossible_arg("<builtin-pair>")
+	}));
+	let insert_table = |table, n| {
+		let (sub_table, sub_value) = table_pair();
+		set_atom_value(table, n, sub_value);
+		sub_table
+	};
 
 	/* FIXME: At some point consolidate all these adhoc functions in one place. */
-	let internalFail () = failwith "Internal consistency error: Reached impossible place" in
+	let internal_fail = || failwith "Internal consistency error: Reached impossible place";
 
-	/* Create a function that consumes an argument, then returns itself. `fn` should return void */
-	let reusable fn =
-		let rec inner arg =
-			fn arg;
-			Value.BuiltinFunctionValue(inner)
-		in inner
-	in
+	/* Create a function that consumes an argument, then returns itself. `func` should return void */
+	fn reusable<F: Fn(Value)>(func: F) -> fn(Value) -> Value {
+		fn inner(arg: Value) {
+			func(arg);
+			Value::BuiltinFunction (inner)
+		}
+		inner
+	}
 
-	setAtomValue "tern" ValueUtil.rawTern;
-	setAtomValue "true" Value.True;
+	set_atom_value(None, "tern", value_util::RAW_TERN);
+	set_atom_value(None, "true", Value::True);
 
-	setAtomFn "not"  (fun v -> match v with Value.Null -> Value.True | _ -> Value.Null);
-	setAtomBinary "primitiveEq" (fun a b -> ValueUtil.boolCast ( (=) a b ));
+	set_atom_fn(None, "not", |v| match v { Value::Null => Value::True, _ => Value::Null });
+	set_atom_binary(None, "primitiveEq", |a, b| value_util::bool_cast(a == b));
 
-	setAtomValue "thisTransplant" ValueUtil.rethisTransplant;
-	setAtomValue "thisInit" ValueUtil.rethisAssignObjectDefinition;
-	setAtomValue "thisFreeze" ValueUtil.rethisAssignObject;
-	setAtomValue "thisUpdate" ValueUtil.rethisSuperFrom;
+	set_atom_value(None, "thisTransplant", value_util::RETHIS_TRANSPLANT);
+	set_atom_value(None, "thisInit", value_util::RETHIS_ASSIGN_OBJECT_DEFINITION);
+	set_atom_value(None, "thisFreeze", value_util::RETHIS_ASSIGN_OBJECT);
+	set_atom_value(None, "thisUpdate", value_util::RETHIS_SUPER_FROM);
 
-	setAtomValue "setPropertyKey" @@ ValueUtil.snippetClosure 3 (function
-		| [Value.TableValue t;k;v] | [Value.ObjectValue t;k;v] ->
-			Value.tableSet t k @@ Value.UserMethodValue v;
-			Value.Null
-		| [_;_;_] -> failwith "Attempted to call setPropertyKey on something other than an object"
-		| _ -> internalFail ()
-	);
+	set_atom_value(None, "setPropertyKey", value_util::snippet_closure(3, |x| match &*x {
+		[Value::Table (t), k, v] |
+		[Value::Object (t), k, v] => {
+			value::table_set(t, k, Value::UserMethod (v));
+			Value::Null
+		}
+		[_, _, _] => failwith "Attempted to call setPropertyKey on something other than an object",
+		_ => internal_fail()
+	}));
 
-	setAtomValue "fail" @@ Value.BuiltinHandoffValue(fun _ stack value ->
-		let message = match value with
-			| Value.StringValue s,_ -> "Program failed: " ^ s
-			| v,_ ->				   "Program failed with value: " ^ (Pretty.dumpValueForUser v)
-		in Execute.failWithStack stack message
-	);
+	set_atom_value(None, "fail", Value::BuiltinHandoff (|_, stack, value| {
+		let message = match value {
+			(Value::String (s), _) => format!("Program failed: {}", s),
+			(v, _) => format!("Program failed with value: {}", pretty::dump_value_for_user(v))
+		};
+		execute::fail_with_stack(stack, message)
+	}));
 
 	/* This has to be a handoff because that's the only way to get context, needed to allocate an object */
-	/* All this really does is convert Options.(run.args) into an Emily list */
-	setAtomValue "getArgs" @@ Value.BuiltinHandoffValue(fun context stack fnat ->
-		let _, at = fnat in
-		let o = ValueUtil.objectBlank context in
-		let ot = Value.tableFrom o in
-		let args = Options.(run.args) in
-		Value.tableSetString ot "count" @@ Value.FloatValue(float_of_int @@ List.length args);
-		List.iteri (fun i str ->
-			Value.tableSet ot (Value.FloatValue(float_of_int i)) (Value.StringValue str)
-		) args;
-		Execute.returnTo context stack (o,at)
-	);
+	/* All this really does is convert options::RUN.args into an Emily list */
+	set_atom_value(None, "getArgs", Value::BuiltinHandoff (|context, stack, (_, at)| {
+		let o = value_util::object_blank(context);
+		let ot = value::table_from(o);
+		let ref args = options::RUN.args;
+		value::table_set_string(ot, "count", Value::Float (args.len() as f64);
+		for (i, st) in args.iter().enumerate() {
+			value::table_set(ot, Value::Float (i as f64), Value::String (st));
+		}
+		execute::return_to(context, stack, (o, at))
+	}));
 
 	/* "Submodule" internal.out */
-	let outTable = insertTable "out" in
-	setAtomFn ~target:outTable "print" @@ reusable (fun v -> print_string @@ Pretty.dumpValueForUser v);
-	setAtomFn ~target:outTable "flush" @@ reusable (fun _ -> flush_all ());
+	let out_table = insert_table(None, "out");
+	set_atom_fn(Some (out_table), "print", reusable(|v| print_string(pretty::dump_value_for_user(v))));
+	set_atom_fn(Some (out_table), "flush", reusable(|_| flush_all () ));
 
 	/* "Submodule" internal.double */
-	let doubleTable = insertTable "double" in
+	let double_table = insert_table(None, "double");
 
-	let setAtomMath ?target:(table=doubleTable) name f = setAtomValue ~target:table name @@ ValueUtil.snippetClosure 2 (function
-		| [Value.FloatValue f1;Value.FloatValue f2] -> Value.FloatValue( f f1 f2 )
-		| [Value.FloatValue _; _] -> failwith "Don't know how to combine that with a number"
-		| _ -> internalFail ()
-	) in
+	let set_atom_math = |table, name, f| set_atom_value(Some (table.unwrap_or(double_table)), name, value_util::snippet_closure(2, |x| match &*x {
+		[Value::Float (f1), Value::Float (f2)] => Value::Float (f(f1, f2)),
+		[Value::Float (_), _] => failwith "Don't know how to combine that with a number",
+		_ => internal_fail ()
+	}));
 
-	let setAtomTest ?target:(table=doubleTable) name f = setAtomValue ~target:table name @@ ValueUtil.snippetClosure 2 (function
-		| [Value.FloatValue f1; Value.FloatValue f2] -> ValueUtil.boolCast( f f1 f2 )
-		| [Value.FloatValue _; _] -> failwith "Don't know how to compare that to a number"
-		| _ -> internalFail ()
-	) in
+	let set_atom_test = |table, name, f| set_atom_value(Some (table.unwrap_or(double_table)), name, value_util::snippet_closure(2, |x| match &*x {
+		[Value::Float (f1), Value::Float (f2)] => value_util::bool_cast(f(f1, f2)),
+		[Value::Float (_), _] => failwith "Don't know how to compare that to a number",
+		_ => internal_fail ()
+	}));
 
-	let setAtomMathFn ?target:(table=doubleTable) name f = setAtomFn ~target:table name @@ (function
-		| Value.FloatValue f1 -> Value.FloatValue( f f1 )
-		| _ -> failwith "Can only perform that function on a number"
-	) in
+	let set_atom_math_fn = |table, name, f| set_atom_fn(Some (table.unwrap_or(double_table)), name, |x| match x {
+		Value::Float (f1) => Value::Float (f(f1)),
+		_ => failwith "Can only perform that function on a number"
+	});
 
-	setAtomMath "add"	  ( +. );
-	setAtomMath "subtract" ( -. );
-	setAtomMath "multiply" ( *. );
-	setAtomMath "divide"   ( /. );
-	setAtomMath "modulus"  modulus;
+	set_atom_math(None, "add", |a, b| a + b);
+	set_atom_math(None, "subtract", |a, b| a - b);
+	set_atom_math(None, "multiply", |a, b| a * b);
+	set_atom_math(None, "divide", |a, b| a / b);
+	set_atom_math(None, "modulus", modulus);
 
 	/* Do I really need all four comparators? */
-	setAtomTest "lessThan"		 ( <  );
-	setAtomTest "lessThanEqual"	( <= );
-	setAtomTest "greaterThan"	  ( >  );
-	setAtomTest "greaterThanEqual" ( >= );
+	set_atom_test(None, "lessThan", |a, b| a < b);
+	set_atom_test(None, "lessThanEqual", |a, b| a <= b);
+	set_atom_test(None, "greaterThan", |a, b| a > b);
+	set_atom_test(None, "greaterThanEqual", |a, b| a >= b);
 
-	setAtomMathFn "floor"  floor;
+	set_atom_math_fn(None, "floor", f64::floor);
 
-	setAtomFn ~target:doubleTable "toString" @@ (function
-		| Value.FloatValue f1 -> Value.StringValue( string_of_float f1 )
-		| _ -> failwith "Can only perform that function on a number"
-	);
-
-	/* "Submodule" internal.string */
-	let atomTable = insertTable "atom" in
-
-	setAtomFn ~target:atomTable "toString" @@ (function
-		| Value.AtomValue s -> Value.StringValue( s )
-		| _ -> failwith "Can only perform that function on an atom"
-	);
+	set_atom_fn(Some (double_table), "toString", |x| match x {
+		Value::Float (f1) => Value::String (f1.to_string()),
+		_ => failwith "Can only perform that function on a number"
+	});
 
 	/* "Submodule" internal.string */
-	let stringTable = insertTable "string" in
+	let atom_table = insert_table(None, "atom");
+
+	set_atom_fn(Some (atom_table), "toString", |x| match x {
+		Value::Atom (s) => Value::String (s),
+		_ => failwith "Can only perform that function on an atom"
+	});
+
+	/* "Submodule" internal.string */
+	let string_table = insert_table(None, "string");
 
 	/* Note: Does NOT coerce into a type, f is of type f -> value */
-	let setAtomStringOp ?target:(table=stringTable) name f = setAtomValue ~target:table name @@ ValueUtil.snippetClosure 1 (function
-		| [Value.StringValue f1] -> f f1
-		| _ -> failwith "Can only perform that operation on a string"
-	) in
+	let set_atom_string_op = |table, name, f| set_atom_value(Some (table.unwrap_or(string_table)), name, value_util::snippet_closure(1, |x| match &*x {
+		[Value::String (f1)] => f(f1),
+		_ => failwith "Can only perform that operation on a string"
+	}));
 
-	let ucharToCodepoint u = Value.FloatValue (float_of_int u) in
-	let ucharToString u = (
-		let buffer = Buffer.create 1 in
-		let enc = Uutf.encoder `UTF_8 @@ `Buffer buffer in
-		ignore @@ Uutf.encode enc (`Uchar u);
-		ignore @@ Uutf.encode enc `End;
-		Value.StringValue(Buffer.contents buffer)
-	) in
-	let iteratorValue filter str = (
-		let loc = fakeRegisterLocation "internal.string.iterUtf8" in
-		let decoder = Uutf.decoder ~encoding:`UTF_8 @@ `String(str) in
-		Value.BuiltinHandoffValue(fun context stack fnat ->
-			let f, at = fnat in
-			let decoded = Uutf.decode decoder in
-			match decoded with
-				| `Uchar u ->
-					let result = filter u in
-					Execute.executeStep context @@
-						   (fakeRegisterFrom @@ Value.PairValue (f,result,loc,loc))
-						::((fakeRegisterFrom @@ Value.FirstValue(truefnValue,loc,loc))
-						::stack)
-				| _ -> Execute.returnTo context stack (Value.Null,loc)
-		)
-	) in
-	setAtomStringOp "iterUtf8"		  (iteratorValue ucharToString);
-	setAtomStringOp "iterUtf8Codepoint" (iteratorValue ucharToCodepoint);
+	let uchar_to_codepoint = |u| Value::Float (u as i32);
+	let uchar_to_string = |u| {
+		let buffer = String::new();
+		let enc = Uutf.encoder(`UTF_8, `Buffer (buffer));
+		Uutf.encode(enc, `Uchar (u));
+		Uutf.encode(enc, `End);
+		Value::String (buffer)
+	};
+	let iterator_value = |filter, st| {
+		let loc = fake_register_location("internal.string.iterUtf8");
+		let decoder = Uutf.decoder(~encoding:`UTF_8, `String(st));
+		Value::BuiltinHandoff (|context, stack, (f, at)| match Uutf.decode(decoder) {
+			`Uchar (u) => {
+				let result = filter(u);
+				let mut v = stack.clone();
+				v.push(fake_register_from(Value::First (TRUEFN_VALUE, loc, loc));
+				v.push(fake_register_from(Value::Pair (f, result, loc, loc)));
+				execute::execute_step(context, v)
+			}
+			_ => execute::return_to(context, stack, (Value::Null, loc))
+		})
+	};
+	set_atom_string_op("iterUtf8", iterator_value(uchar_to_string));
+	set_atom_string_op("iterUtf8Codepoint", iterator_value(uchar_to_codepoint));
 
-	setAtomValue ~target:stringTable "codepointToString" @@ ValueUtil.snippetClosure 1 (function
-		| [Value.FloatValue u] -> ucharToString @@ int_of_float u
-		| _ -> failwith "Can only perform that operation on a number"
-	);
+	set_atom_value(Some (string_table), "codepointToString", value_util::snippet_closure(1, |x| match &*x {
+		[Value::Float (u)] => uchar_to_string(u as i32),
+		_ => failwith "Can only perform that operation on a number"
+	}));
 
-	setAtomValue ~target:stringTable "concat" @@ ValueUtil.snippetClosure 2 (function
-		| [Value.StringValue f1;Value.StringValue f2] -> Value.StringValue( f1 ^ f2 )
-		| [Value.StringValue _; _] -> failwith "Don't know how to combine that with a string"
-		| _ -> internalFail ()
-	);
+	set_atom_value(Some (string_table), "concat", value_util::snippet_closure(2, |x| match &*x {
+		[Value::String (f1), Value::String (f2)] => Value::String (format!("{}{}", f1, f2)),
+		[Value::String (_), _] => failwith "Don't know how to combine that with a string",
+		_ => internal_fail()
+	}));
 
 	/* "Submodule" internal.type */
-	let typeTable = insertTable "type" in
+	let type_table = insert_table(None, "type");
 
-	setAtomFn ~target:typeTable "isAtom"   (fun v -> match v with Value.AtomValue   _ -> Value.True | _ -> Value.Null);
-	setAtomFn ~target:typeTable "isString" (fun v -> match v with Value.StringValue _ -> Value.True | _ -> Value.Null);
-	setAtomFn ~target:typeTable "isNumber" (fun v -> match v with Value.FloatValue  _ -> Value.True | _ -> Value.Null);
+	set_atom_fn(Some (type_table), "isAtom", |v| match v { Value::Atom (_) => Value::True, _ => Value::Null});
+	set_atom_fn(Some (type_table), "isString", |v| match v { Value::String (_) => Value::True, _ => Value::Null});
+	set_atom_fn(Some (type_table), "isNumber", |v| match v { Value::Float (_) => Value::True, _ => Value::Null});
 
 	/* "Submodule" internal.type */
 	
-	#[cfg(BUILD_INCLUDE_C_FFI)]
-	{
-		let ffiTable = insertTable "ffi" in
-		let open FfiSupport in (
-			setAtomFn ~target:ffiTable "newForeign" (
-				function _ ->
-					let foreigner = {name=None; args=[]; returning="void"} in
-					let table = ValueUtil.tableBlank Value.NoSet in
-					let setFfiParam what fn = Value.tableSetString table what @@ Value.BuiltinFunctionValue(
-						function Value.AtomValue s | Value.StringValue s -> fn s; Value.Null
-						| x -> failwith @@ "Need key "^Pretty.dumpValue(x)^" for ffi "^what^"; expected string or atom"
-					) in
-					setFfiParam "name"	  (fun s -> foreigner.name <- Some s);
-					setFfiParam "return"	(fun s -> foreigner.returning <- s);
-					setFfiParam "args"	  (fun s -> foreigner.args <- s::foreigner.args);
-					Value.tableSetString table "make" @@ Value.BuiltinFunctionValue(function _ ->
-						match foreigner.name with
-							| None -> failwith "No name provided for FFI function";
-							| Some name ->
-								valueForeign name (List.rev foreigner.args) foreigner.returning
-					);
-					Value.TableValue(table)
-			)
-		);
+	if cfg!(BUILD_INCLUDE_C_FFI) {
+		use ffi_support::*;
+		let ffi_table = insert_table(None, "ffi");
+		
+		set_atom_fn(Some (ffi_table), "newForeign", |_| {
+			let foreigner = {name=None; args=[]; returning="void"};
+			let table = value_util::table_blank(TableBlankKind::NoSet);
+			let set_ffi_param = |what, func| value::table_set_string(table, what, Value::BuiltinFunction (|a| match a {
+				Value::Atom (s) | Value::String (s) => { func(s); Value::Null }
+				x => failwith @@ format!("Need key {} for ffi {}; expected string or atom", pretty::dump_value(x), what)
+			}));
+			set_ffi_param("name", |s| foreigner.name = Some (s));
+			set_ffi_param("return", |s| foreigner.returning = s);
+			set_ffi_param("args", |s| foreigner.args = {
+				let t = foreigner.args.clone();
+				t.push(s);
+				t
+			});
+			value::table_set_string(table, "make", Value::BuiltinFunction (|_|
+				match foreigner.name {
+					None => failwith "No name provided for FFI function",
+					Some (name) =>
+						value_foreign(name, foreigner.args.clone().reverse(), foreigner.returning)
+				}
+			));
+			Value::Table (table)
+		});
 	}
 
 	/* Done */

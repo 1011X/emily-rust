@@ -8,7 +8,7 @@ pub enum CodeSource {
 	Stdin,
 	Cmdline,
 	Unknown,
-	Internal (String),
+	Internal (&'static str),
 	File (String)
 }
 
@@ -38,11 +38,11 @@ pub fn position_string(p: &CodePosition) -> String {
 }
 
 /* If the group is boxed, what is returned from it? */
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum BoxKind { NewObject, NewScope }
 
 /* What are the rules for descending into this group? */
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum TokenGroupKind {
 	Plain,               /* Parenthesis */
 	Scoped,              /* Create a new scope within this group */
