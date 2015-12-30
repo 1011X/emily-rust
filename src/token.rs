@@ -53,7 +53,7 @@ pub enum TokenGroupKind {
 #[derive(Clone)]
 pub enum TokenClosureKind {
 	NonClosure,                               /* Is not a function */
-	ClosureWithBinding (Vec<(bool, String)>)  /* Function with argument-- arg is return?,args */
+	ClosureWithBinding (bool, Vec<String>)  /* Function with argument-- arg is return?,args */
 }
 
 /* Representation of a tokenized code blob. */
