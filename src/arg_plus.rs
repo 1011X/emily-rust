@@ -10,119 +10,132 @@ Not all features of Arg are implemented, notably most spec types are not support
 use std::env;
 use std::collections::HashMap;
 
+use ocaml;
+use ocaml::arg;
+
+use ocaml::arg::Spec;
+
 /* I use this to turn a single set of rules into simultaneously environment and argument parse rules. See options.ml */
 pub fn key_mutate<F, V>(f: F, vec: V) -> V where
-F : FnOnce(Vec<Arg::key>) -> Vec<Arg::key>,
-V : Vec<(Vec<Arg::key>, Arg::spec, Arg::doc)> {
+F: FnOnce(Vec<arg::Key>) -> Vec<arg::Key>,
+V: Vec<(Vec<arg::Key>, arg::Spec, arg::Doc)> {
 	vec.iter().cloned().map(|(a, b, c)| (f(a), b, c)).collect()
 }
 
-fn argPlusLimitations(who: &'static str) -> Result<(), ocaml::Failure> {
-	Err (ocaml::Failure (format!("Internal error: Called {} with an arg spec it was not designed to handle.", who)))
+fn arg_plus_limitations(who: &'static str) -> Result<(), ocaml::Failure> {
+	ocaml::failwith(format!("Internal error: Called {} with an arg spec it was not designed to handle.", who))
 }
 
 /* Rule methods can raise Arg.Bad, Arg.Help, ArgPlus.Help or ArgPlus.Complete */
-
-// exceptions
-struct Complete;   /* Success, stop processing arguments */
-struct Help (i32); /* Argument is exit code */
+pub enum Error {
+	Bad (String),
+	Help (String),
+	HelpExit (i32), /* Argument is exit code */
+	Complete,       /* Success, stop processing arguments */
+}
 
 /* Takes the rule list normally given as first argument to Arg.parse and parses env vars against it. */
-fn envParse(arg: Vec<(Arg.key, Arg.spec, Arg.doc)>) -> {
+pub fn env_parse(arg: Vec<(arg::Key, arg::Spec, arg::Doc)>) -> Result<(), Failure> {
 	for (key, spec, _) in arg {
 		/* Rather than iterating env, iterate the rule list and check for each env we recognize */
 		let value = match env::var(key) { /* May fail */
 			Ok (v) => v,
-			Err (_) => continue /* env::var failed, which means the env var wasn't present. Move on */
-		}
+			Err (_) => continue, /* env::var failed, which means the env var wasn't present. Move on */
+		};
 		
 		match spec {
 			/* Discard argument-- does this ever even make sense? */
-			Arg.Unit (f) => f(),
+			Spec::Unit (f) => f(),
 
 			/* String argument */
-			Arg.String (f) => f(value),
+			Spec::String (f) => f(value),
 
 			/* Incorrect use of ArgParse */
-			_ => argPlusLimitations("envParse")
+			_ => return arg_plus_limitations("env_parse"),
 		}
 	}
+	Ok(())
 }
 
 /* Notice one additional argument vs Arg.parse, called after successful completion with unprocessed part of arg list (possibly empty) */
-fn argParse(rules, fallback, usage, onComplete) {
+pub fn arg_parse<F, G, V>(rules: V, fallback: F, usage: String, on_complete: G) where
+V: Vec<(arg::Key, arg::Spec, arg::Doc)>,
+F: Fn(String) -> Result<(), Error>,
+G: Fn(Vec<String>) {
 	/* Store all rules keyed on parameter */
-	let lookup : HashMap<Arg::Key, Arg::Spec> = HashMap::with_capacity(1);
+	let lookup: HashMap<Arg::Key, Arg::Spec> = HashMap::with_capacity(rules.len());
 	for (key, spec, _) in rules {
 		lookup.insert(key, spec);
 	}
 
 	/* Function to imperatively stream in each argument, one at a time */
-	let mut rest : Vec<String> = env::args().collect();
+	let mut rest: Vec<String> = env::args().collect();
 	let consume = || match &*rest {
 		[] => None,
 		[next, more..] => {
 			rest = more.to_vec();
-			Some(next)
+			Some (next)
 		}
 	};
 
 	/* Inner loop */
-	fn proceed() {
+	fn proceed() -> Result<(), > {
 		if let Some (key) = consume() { /* Argument found */
 			match lookup.get(key) {
 				/* This is a known argument and it has no arguments */
-				Some (Arg.Unit (f)) => Ok(f()),
+				Some (Spec::Unit (f)) => Ok(f()),
 
 				/* This is a known argument and it has one argument, a string */
-				Some (Arg.String (f)) => match consume() {
-					None => Err (Arg.Bad (format!("option '{}' needs an argument.", key))),
-					Some (arg) => Ok (f(arg))
+				Some (Spec::String (f)) => match consume() {
+					None => Err (Error::Bad (format!("option '{}' needs an argument.", key))),
+					Some (arg) => Ok (f(arg)),
 				},
 
 				/* Incorrect use of ArgPlus */
-				Some (_) => argPlusLimitations("argParse"),
+				Some (_) => arg_plus_limitations("arg_parse"),
 
 				/* Not a known argument key */
 				None => {
 					/* Interpret key string to see just what this is */
-					let keyLen = key.len();
+					let key_len = key.len();
 
 					/* It starts with a - */
-					if keyLen > 0 && key.chars().nth(0) == '-' {
+					if key_len > 0 && key.starts_with('-') {
 						match key.find("=") {
 							/* It's a --a=b, which is why we didn't find the key in the lookup table... */
-							Some(splitAt) => {
+							Some (split_at) => {
 								/* Split out the key and value implied by the = and take a pass at lookup */
-								let subKey = key[0..splitAt].to_string();
-								let subValue = key[splitAt + 1 .. keyLen - splitAt - 1].to_string();
-								match lookup.get(subKey) {
+								let sub_key = key[0..split_at].to_string();
+								let sub_value = key[split_at + 1..key_len - split_at - 1].to_string();
+								
+								match lookup.get(sub_key) {
 									/* The argument is recognized, but can't be used with = */
-									Some (Arg.Unit (_)) => Err (Arg.Bad (format!("option '{}' does not take an argument.", subKey)))
+									Some (Spec::Unit (_)) => Err (Spec::Bad (format!("option '{}' does not take an argument.", sub_key)))
 
 									/* The argument is recognized and we can work with it */
-									Some (Arg.String (f)) => Ok(f(subValue)),
+									Some (Spec::String (f)) => Ok(f(sub_value)),
 
 									/* Incorrect use of ArgPlus */
-									Some (_) => argPlusLimitations("argParse"),
+									Some (_) => arg_plus_limitations("arg_parse"),
 
 									/* Despite pulling out the =, it's still unrecognized */
-									None => Err (Arg.Bad (format!("unknown option '{}'", subKey)))
+									None => Err (Spec::Bad (format!("unknown option '{}'", sub_key)))
 								}
-							},
+							}
 							/* No gimmicks, it's just plain not recognized */
-							None => Err (Arg.Bad (format!("unknown option '{}'", key)))
+							None => Err (Spec::Bad (format!("unknown option '{}'", key)))
 						}
 					}
 					/* This doesn't start with a -, so it's an anonymous argument. Let the user handle it */
 					else {
 						fallback(key);
 					}
-					proceed();
+					
+					proceed()
 				}
 			}
 		}
-	};
+	}
 
 	/* Error/exceptional situation handling */
 	let name = match consume() {
@@ -138,7 +151,7 @@ fn argParse(rules, fallback, usage, onComplete) {
 			Err (Complete) => Ok(()),
 			
 			/* We ended without failing, so call the complete handler */
-			_ => onComplete(!rest)
+			_ => on_complete(!rest)
 		}
 	} {
 		/* Something requested the help be shown */

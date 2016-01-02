@@ -409,10 +409,10 @@ pub fn table_blank(kind: TableBlankKind) -> TableType {
 }
 
 pub enum BoxTarget { Package, Object }
-pub type BoxSpec = Populating (BoxTarget, Value);
+pub enum BoxSpec { Populating(BoxTarget, Value) }
 
 pub fn box_blank(box_kind: BoxSpec, box_parent: Value) -> TableType {
-    let Populating(target_type, target_value) = box_kind;
+	let BoxSpec::Populating(target_type, target_value) = box_kind;
     let mut t = table_blank(TableBlankKind::NoLet);
     let mut private_table = table_blank(TableBlankKind::NoLet);
     let private_value = Value::Table(private_table);

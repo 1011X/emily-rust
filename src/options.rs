@@ -17,8 +17,8 @@ lazy_static! {
 
 pub enum ExecutionTarget {
 	Stdin,
-	File(String),
-	Literal(String)
+	File (String),
+	Literal (String)
 }
 
 pub struct OptionSpec {
@@ -150,9 +150,10 @@ Options:";
 	];
 
 	let args = {
-		let c = execute_args.clone();
+		let mut c = execute_args.clone();
 		c.push_all(*key_mutate_argument(environment_args));
 		c.push_all(&debug_args);
+		c
 	};
 
 	let targetParse = |t| {
@@ -166,7 +167,7 @@ Options:";
 	
 	
 	
-	
+	/*
 	let mut opts = Options::new();
 	opts.optopt("e", "", "Execute code inline", "<code>");
 	
@@ -177,8 +178,8 @@ Options:";
 	opts.optflag("v", "version", "Print interpreter version");
 	opts.optflag("h", "help", "Display this list of options");
 	opts.optflag("", "machine-version", "Print interpreter version (number only) and quit");
-	opts.optflag("", "package-path", "Directory root for packages loaded from \"package\"");
-	opts.optflag("", "project-path", "Directory root for packages loaded from \"project\"");
+	//opts.optflag("", "package-path", "Directory root for packages loaded from \"package\"");
+	//opts.optflag("", "project-path", "Directory root for packages loaded from \"project\"");
 	opts.optflag("", "debug-dis", "Print \"disassembled\" code and exit");
 	opts.optflag("", "debug-disv", "Print \"disassembled\" code with position data and exit");
 	opts.optflag("", "debug-macro", "Print results of each individual macro evaluation");
@@ -186,11 +187,12 @@ Options:";
 	opts.optflag("", "debug-track", "When executing, give all objects a unique \"!id\" member");
 	opts.optflag("", "debug-set", "When executing, print object contents on each set");
 	opts.optflag("", "debug-run", "When executing, set all runtime trace type options");
-	opts.optflag("", "debug-print-package-path", "Print package loader path and quit");
-    opts.optflag("", "debug-print-project-path", "Print project loader path and quit");
+	//opts.optflag("", "debug-print-package-path", "Print package loader path and quit");
+    //opts.optflag("", "debug-print-project-path", "Print project loader path and quit");
 	
 	
-	let arguments : Vec<String> = env::args().collect();
+	let arguments: Vec<String> = env::args().collect();
+	
 	let matches = match opts.parse(&arguments[1..]) {
 		Ok (m) => m,
 		Err (f) => {
@@ -213,7 +215,7 @@ Options:";
 	if matches.free.contains(&"-".to_string()) {
 		RUN.target = Some(ExecutionTarget::Stdin);
 	}
-	
+	*/
 	
 	
 	
