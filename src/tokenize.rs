@@ -24,21 +24,21 @@ struct TokenizeState {
 	line: isize
 }
 
-enum GroupCloseToken { Eof, Char (String) }
+enum GroupCloseToken { Eof, Char (char) }
 
 type GroupCloseRecord = (GroupCloseToken, CodePosition);
 
-fn group_close_human_readable(kind: GroupCloseToken) -> String {
-	match kind {
+pub fn group_close_human_readable(kind: &GroupCloseToken) -> String {
+	match *kind {
 		GroupCloseToken::Eof => "end of file".to_string(),
-		GroupCloseToken::Char (s) => format!("\"{}\"", s)
+		GroupCloseToken::Char (c) => format!("\"{}\"", c),
 	}
 }
 
 /* Entry point to tokenize, takes a filename and a lexbuf */
 /* TODO: Somehow strip blank lines? */
 // Error: CompilationError + Failure
-fn tokenize(enclosingKind: TokenGroupKind, name: CodeSource, buf) -> Result<Token, Error> {
+pub fn tokenize(enclosingKind: TokenGroupKind, name: CodeSource, buf) -> Result<Token, Error> {
     /* -- Helper regexps -- */
     // let digit = Regex::new("[:digit:]").unwrap();
     let number = Regex::new("[:digit:]+").unwrap();
@@ -51,20 +51,24 @@ fn tokenize(enclosingKind: TokenGroupKind, name: CodeSource, buf) -> Result<Toke
     let wordPattern = Regex::new("[:alpha:][:alnum:]*").unwrap();
     let sciNotation = Regex::new("[eE][-+]?[:digit:]").unwrap();
     let floatPattern = Regex::new(r"\.[:digit:]+|[:digit:]+(?:.+)?").unwrap();
-    // let numberPattern = Regex::new(r"").unwrap();
     // TODO: implement
+    // let numberPattern = Regex::new(r"").unwrap();
     
     
     /* Helper function: We treat a list as a stack by appending elements to the beginning,
        but this means we have to do a reverse operation to seal the stack at the end. */
-    let cleanup = |l| l.clone().reverse();
+    let cleanup = |l| {
+    	let lt = l.clone();
+    	lt.reverse();
+    	lt
+	};
 
     /* Individual lines get a more special cleanup so macro processing can occur */
     let complete_line = |l| {
         if options::RUN.step_macro { 
-            println!("-- Macro processing for {}", token::file_name_string(name));
+            println!("-- Macro processing for {}", name);
         }
-        macro_::process(cleanup(l))
+        macros::process(cleanup(l))
     };
 
     /* -- State management machinery -- */
@@ -82,8 +86,8 @@ fn tokenize(enclosingKind: TokenGroupKind, name: CodeSource, buf) -> Result<Toke
         line_offset: Sedlexing.lexeme_end(buf) - state.line_start
     };
     /* Parse failure. Include current position string. */
-    let parse_fail = |mesg| token::fail_at(current_position(), mesg.to_string());
-    let incomplete_fail = |mesg| token::incomplete_at(current_position(), mesg.to_string());
+    let parse_fail = |mesg| token::fail_at(current_position(), mesg);
+    let incomplete_fail = |mesg| token::incomplete_at(current_position(), mesg);
 
     /* -- Parsers -- */
 
@@ -205,10 +209,10 @@ fn tokenize(enclosingKind: TokenGroupKind, name: CodeSource, buf) -> Result<Toke
 
         let group_close_make_from = |st| {
             let ch = match st {
-                "{" => "}",
-                "(" => ")",
-                "[" => "]",
-                _ => return Err(parse_fail("Internal failure: interpreter is confused about parenthesis").unwrap_err())
+                '{' => '}',
+                '(' => ')',
+                '[' => ']',
+                _ => return Err(parse_fail("Internal failure: interpreter is confused about parenthesis").unwrap_err()),
             };
             
             Ok((GroupCloseToken::Char (ch), current_position()))
@@ -216,7 +220,7 @@ fn tokenize(enclosingKind: TokenGroupKind, name: CodeSource, buf) -> Result<Toke
 
         let group_close_under_token = || match matched_lexemes() {
         	"" => GroupCloseToken::Eof,
-        	s => GroupCloseToken::Char (s)
+        	s => GroupCloseToken::Char (s),
         };
 
         /* Recurse with blank code, and a new group_seed described by the arguments */
@@ -250,7 +254,7 @@ fn tokenize(enclosingKind: TokenGroupKind, name: CodeSource, buf) -> Result<Toke
                 	match candidate_close {
 		                /* No close before EOF: Failure is positioned at the opening symbol */
 		                GroupCloseToken::Eof => Err(token::incomplete_at(group_close_at,
-		                    &format!("Did not find matching {} anywhere before end of file. Opening symbol:"), group_close_human_readable(group_close)).unwrap_err())
+		                    &format!("Did not find matching {} anywhere before end of file. Opening symbol:", group_close_human_readable(group_close))).unwrap_err())
 		                /* Close present, but wrong: Failure is positioned at closing symbol */
 		                GroupCloseToken::Char (_) => Err(parse_fail(
                         format!("Expected closing {} but instead found {}", group_close_human_readable(group_close), group_close_human_readable(candidate_close))).unwrap_err())
@@ -262,6 +266,7 @@ fn tokenize(enclosingKind: TokenGroupKind, name: CodeSource, buf) -> Result<Toke
             '"' => add_to_line_proceed(make_token_here(TokenContents::String (quoted_string()))),
 
             /* Floating point number */
+            // FIXME: try parse
             floatPattern => add_single(|x| TokenContents::Number (try!(x.parse::<f64>()))),
 
             /* Local scope variable */
@@ -308,19 +313,17 @@ pub fn tokenize_string(source: CodeSource, string: String) -> Result<Token, Erro
     tokenize(TokenGroupKind::Plain, source, lexbuf)
 }
 
-fn unwrap(token: Token) -> Result<CodeSequence, String> {
+pub fn unwrap(token: Token) -> Result<CodeSequence, String> {
 	match token.contents {
 		TokenContents::Group (g) => Ok (g.items),
-		_ => Err (format!("Internal error: Object in wrong place {}", token::position_string(token.at)))
+		_ => Err (format!("Internal error: Object in wrong place {}", token.at))
 	}
 }
 
-fn snippet(source: CodeSource, st: String) -> Result<CodeSequence, String> {
+pub fn snippet(source: CodeSource, st: String) -> Result<CodeSequence, String> {
     match tokenize_string(source, st) {
         Ok (v) => unwrap(v),
         
-        Err (CompilationError (e)) => Err(format!(
-            "Internal error: Interpreter-internal code is invalid:{}",
-            token::error_string(e)))
+        Err (e) => Err(format!("Internal error: Interpreter-internal code is invalid: {}", e)),
     }
 }

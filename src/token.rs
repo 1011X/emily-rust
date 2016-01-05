@@ -2,6 +2,9 @@
 use CodeSource::*;
 use TokenFailureKind::*;
 
+use std::fmt;
+use std::string::ToString;
+
 /* Records the original source file of a token */
 #[derive(Clone)]
 pub enum CodeSource {
@@ -12,29 +15,46 @@ pub enum CodeSource {
 	File (String)
 }
 
-/* Records the original source position of a token */
-#[derive(Clone)]
-pub struct CodePosition {
-	file_name : CodeSource,
-	line_number : isize,
-	line_offset : isize
-}
-
-/* Make CodePosition.file_name human-readable */
-pub fn file_name_string(n: &CodeSource) -> String {
-	match *n {
-		Stdin => "<input>".to_string(),
-		Cmdline => "<commandline>".to_string(),
-		Unknown => "<unknown>".to_string(),
-		Internal (ref s) => format!("<internal:{}>", s),
-		File (ref s) => format!("'{}'", s)
+/* Make CodeSource human-readable */
+impl fmt::Display for CodeSource {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		match *self {
+			Stdin => f.write_str("<input>"),
+			Cmdline => f.write_str("<commandline>"),
+			Unknown => f.write_str("<unknown>"),
+			
+			Internal (ref s) => f.write_fmt(format_args!("<internal:{}>", s)),
+			File (ref s) => f.write_fmt(format_args!("'{}'", s)),
+		}
 	}
 }
 
+// Not really needed...
+impl ToString for CodeSource {
+	fn to_string(&self) -> String {
+		format!("{}", self)
+	}
+}
+
+/* Records the original source position of a token */
+#[derive(Clone)]
+pub struct CodePosition {
+	file_name: CodeSource,
+	line_number: usize,
+	line_offset: isize,
+}
+
 /* Make CodePosition human-readable */
-pub fn position_string(p: &CodePosition) -> String {
-	format!("[{} line {} ch {}]",
-	file_name_string(&p.file_name), p.line_number, p.line_offset)
+impl fmt::Display for CodePosition {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Display {
+		f.write_fmt(format_args!("[{} line {} ch {}]", self.file_name, self.line_number, self.line_offset))
+	}
+}
+
+impl ToString for CodePosition {
+	fn to_string(&self) -> String {
+		format!("{}", self)
+	}
 }
 
 /* If the group is boxed, what is returned from it? */
@@ -53,7 +73,7 @@ pub enum TokenGroupKind {
 #[derive(Clone)]
 pub enum TokenClosureKind {
 	NonClosure,                               /* Is not a function */
-	ClosureWithBinding (bool, Vec<String>)  /* Function with argument-- arg is return?,args */
+	ClosureWithBinding (bool, Vec<String>)    /* Function with argument-- arg is return?,args */
 }
 
 /* Representation of a tokenized code blob. */
@@ -63,10 +83,10 @@ pub type CodeSequence = Vec<Vec<Token>>;
 
 #[derive(Clone)]
 pub struct TokenGroup {
-	kind : TokenGroupKind,      /* Group kind */
-	closure : TokenClosureKind,  /* Closure kind, if any */
-	group_initializer : Vec<Token>,    /* Used to create scope */
-	items : CodeSequence /* Group is a list of lines, lines are a list of tokens */
+	kind: TokenGroupKind,      /* Group kind */
+	closure: TokenClosureKind,  /* Closure kind, if any */
+	group_initializer: Vec<Token>,    /* Used to create scope */
+	items: CodeSequence /* Group is a list of lines, lines are a list of tokens */
 }
 
 /* Data content of a token */
@@ -83,8 +103,8 @@ pub enum TokenContents {
 /* A token. Effectively, an AST node. */
 #[derive(Clone)]
 pub struct Token {
-	at : CodePosition,
-	contents : TokenContents
+	at: CodePosition,
+	contents: TokenContents
 }
 
 /* Quick constructor for token */
@@ -93,6 +113,8 @@ pub fn make_token(position: &CodePosition, contents: &TokenContents) -> Token {
 		at: position.clone(),
 		contents: contents.clone()
 	}
+	make_token(position, contents)
+	Token {at: position, contents}
 }
 
 /* Quick constructor for token, group type */
@@ -119,8 +141,8 @@ impl Token {
 	// XXX: make_token
 	pub fn new(position: &CodePosition, contents: &TokenContents) -> Token {
 		Token {
-			at : position.clone(),
-			contents : contents.clone()
+			at: position.clone(),
+			contents: contents.clone()
 		}
 	}
 	
@@ -155,18 +177,21 @@ pub enum TokenFailureKind {
 
 pub struct CompilationError (TokenFailureKind, CodePosition, String);
 
-pub fn incomplete_at(at: &CodePosition, mesg: &String) -> Result<(), CompilationError> {
-	Err(CompilationError (IncompleteError, at.clone(), mesg.clone()))
+impl fmt::Display for CompilationError {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		let CompilationError (_, ref at, ref mesg) = *self;
+		f.write_fmt(format_args!("Fatal error: {} {}", mesg, at))
+	}
 }
 
-pub fn fail_at(at: &CodePosition, mesg: &String) -> Result<(), CompilationError> {
-	Err(CompilationError (InvalidError, at.clone(), mesg.clone()))
+pub fn incomplete_at(at: &CodePosition, mesg: &str) -> Result<(), CompilationError> {
+	Err(CompilationError (IncompleteError, at.clone(), mesg.to_string()))
+}
+
+pub fn fail_at(at: &CodePosition, mesg: &str) -> Result<(), CompilationError> {
+	Err(CompilationError (InvalidError, at.clone(), mesg.to_string()))
 }
 
 pub fn fail_token(at: &Token, mesg: &String) -> Result<(), CompilationError> {
 	fail_at(&at.at, &mesg)
-}
-
-pub fn error_string(&CompilationError (_, ref at, ref mesg): &CompilationError) -> String {
-	format!("Fatal error: {} {}", mesg, position_string(at))
 }

@@ -62,7 +62,7 @@ pub fn dump_code_tree_terse(token: &Token) -> String {
 /* "Disassemble" a token tree into a human-readable string (specialized to show token positions) */
 pub fn dump_code_tree_dense(token: &Token) -> String {
     fn one_token(x: &Token) -> String {
-    	format!("{} {}", token::position_string(&x.at), dump_code_tree_general(group_printer, x))
+    	format!("{} {}", x.at, dump_code_tree_general(group_printer, x))
     }
     
     fn group_printer(token: &Token, l: String, r: String, items: CodeSequence) -> String {
@@ -84,7 +84,7 @@ pub fn dump_code_tree_dense(token: &Token) -> String {
 /* --- Value printers --- */
 
 /* Re-escape string according to the Emily reader's rules */
-pub fn escape_string(s: String) -> String {
+pub fn escape_string(s: &str) -> String {
     let mut sb = String::with_capacity(s.len() + 2);
     sb.push('"');
     for c in s.chars() {
@@ -101,7 +101,7 @@ pub fn escape_string(s: String) -> String {
     sb
 }
 
-pub fn angle_wrap(s: String) -> String {
+pub fn angle_wrap(s: &str) -> String {
 	format!("<{}>", s)
 }
 
@@ -120,8 +120,7 @@ pub fn id_string_for_value(v: &Value) -> String {
 	}
 }
 
-pub fn dump_value_tree_general<F>(wrapper: F, v: &Value) -> String where
-F: Fn(String, &Value) -> String {
+pub fn dump_value_tree_general(wrapper: fn(String, &Value) -> String, v: &Value) -> String {
     match *v {
         Value::Null => "<null>".to_string(),
         Value::True => "<true>".to_string(),
@@ -133,35 +132,27 @@ F: Fn(String, &Value) -> String {
         Value::BuiltinUnaryMethod (_) => "<property-builtin>".to_string(),
         Value::Closure (ClosureValue {exec: e, need_args: n}) => {
             let tag = match e {
-            	ClosureExec::ClosureExecUser (_) => "closure",
-            	ClosureExec::ClosureExecBuiltin (_) => "closure-builtin"
+            	ClosureExec::User {..} => "closure",
+            	ClosureExec::Builtin (_) => "closure-builtin"
             };
             format!("<{}/{}>", tag, n)
         }
-        Value::Table (_) => wrapper("scope".to_string(), v), /* From the user's perspective, a table is a scope */
-        Value::Object (_) => wrapper("object".to_string(), v),
+        Value::Table (_) => wrapper("scope", v), /* From the user's perspective, a table is a scope */
+        Value::Object (_) => wrapper("object", v),
         Value::Continuation (_) => "<return>".to_string()
     }
 }
 
-pub fn simple_wrapper(label: String, obj: &Value) -> String {
+pub fn simple_wrapper(label: &str, obj: &Value) -> String {
 	angle_wrap(label)
 }
 
-pub fn label_wrapper(label: String, obj: &Value) -> String {
+pub fn label_wrapper(label: &str, obj: &Value) -> String {
 	angle_wrap(match *obj {
-		Value::Table (t) | Value::Object (t) => label + ":" + &id_string_for_table(t),
+		Value::Table (ref t) | Value::Object (ref t) =>
+			&format!("{}:{}", label, id_string_for_table(t)),
 		_ => label,
 	})
-}
-
-pub fn dump_value(v: &Value) -> String {
-    let wrapper: &Fn(String, &Value) -> String = if options::RUN.track_objects {
-    	label_wrapper
-    } else {
-    	simple_wrapper
-    };
-    dump_value_tree_general(wrapper, v)
 }
 
 /* FIXME: The formatting here is not even a little bit generalized. */
@@ -169,16 +160,16 @@ pub fn dump_value(v: &Value) -> String {
 pub fn dump_value_unwrapped_table(t: &TableValue) -> String {
 	" = [\n            ".to_string()
 	+ &t.iter()
-		.map(|&(v1, v2)| dump_value(v1) + " = " + &dump_value(v2))
+		.map(|&(v1, v2)| format!("{} = {}", v1, v2))
 		.collect::<Vec<_>>()
 		.join("\n            ")
 	+ "\n        ]"
 }
 
 pub fn dump_value_table(v: &Value) -> String {
-	dump_value(v) + match *v {
-		Value::Table (t) | Value::Object (t) => dump_value_unwrapped_table(t),
-		_ => "".to_string(),
+	v.to_string() + match *v {
+		Value::Table (t) | Value::Object (t) => &dump_value_unwrapped_table(t),
+		_ => "",
 	}
 }
 
@@ -186,15 +177,15 @@ pub fn dump_value_new_table(v: &Value) -> String {
 	if options::RUN.trace_set {
 		dump_value_table(v)
 	} else {
-		dump_value(v)
+		v.to_string()
 	}
 }
 
 /* Normal "print" uses this */
 pub fn dump_value_for_user(v: &Value) -> String {
 	match *v {
-		Value::String (s) | Value::Atom (s) => s,
-		_ => dump_value(v)
+		Value::String (ref s) | Value::Atom (ref s) => s.clone(),
+		_ => v.to_string(),
 	}
 }
 
@@ -223,16 +214,17 @@ pub fn sort_items(&(k1, v1): &(&Value, &Value), &(k2, v2): &(&Value, &Value)) ->
 /* Display the key atom -- special-cased to avoid using a dot, since defns don't use them */
 pub fn display_key(k: &Value) -> String {
     match *k {
-		Value::Atom (s) => s,
-		Value::Float (n) => format!("<{}>", n.to_string()),
+		Value::Atom (s) => s.clone(),
+		Value::Float (n) => format!("<{}>", n),
 		_ => "<error>".to_string()
 	}
 }
 
 /* (Optionally) truncate a string and append a suffix */
-pub fn truncate(s: String, limit_at: usize, reduce_to: usize, suffix: &str) -> String {
+pub fn truncate(mut s: String, limit_at: usize, reduce_to: usize, suffix: &str) -> String {
     if s.len() > limit_at {
-    	s.clone().truncate(reduce_to) + suffix
+    	s.truncate(reduce_to);
+    	s + suffix
     }
     else {
     	s
@@ -265,8 +257,8 @@ pub fn repl_display(value: &Value, recurse: bool) -> String {
         Value::Null => "null".to_string(),
         Value::True => "true".to_string(),
         Value::Float (n) => n.to_string(),
-        Value::String (s) => escape_string(s),
-        Value::Atom (s) => format!(".{}", s),
+        Value::String (ref s) => escape_string(s),
+        Value::Atom (ref s) => format!(".{}", s),
         Value::Table (ref t) | Value::Object (ref t) =>
             if recurse { display_table(t) } else { "<object>".to_string() },
         _ => dump_value_for_user(value),

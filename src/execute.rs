@@ -31,14 +31,14 @@ use token::CodeSequence;
 /* -- DEBUG / PRETTYPRINT HELPERS -- */
 
 /* Pretty print for RegisterState. Can't go in pretty.rs because module recursion. */
-pub fn dump_register_state(register_state: RegisterState) -> String {
-    match register_state {
-		RegisterState::LineStart (v, _) =>
-			format!("LineStart:{}", pretty::dump_value(v)),
-		RegisterState::FirstValue (v, _, _) =>
-			format!("FirstValue:{}", pretty::dump_value(v)),
-		RegisterState::PairValue (v1, v2, _, _) =>
-			format!("PairValue:{},{}", pretty::dump_value(v1), pretty::dump_value(v2)),
+pub fn dump_register_state(register_state: &RegisterState) -> String {
+    match *register_state {
+		RegisterState::LineStart (ref v, _) =>
+			format!("LineStart:{}", v),
+		RegisterState::FirstValue (ref v, ..) =>
+			format!("FirstValue:{}", v),
+		RegisterState::PairValue (ref v1, ref v2, ..) =>
+			format!("PairValue:{},{}", v1, v2),
 	}
 }
 
@@ -109,11 +109,13 @@ pub fn stack_frame(scope: Value, code: CodeSequence, at: CodePosition) -> Execut
 
 /* Only call if it really is impossible, since this gives no debug feedback */
 /* Mostly I call this if a nested match has to implement a case already excluded */
-pub fn internal_fail() -> Result<(), &'static str> {
-	Err ("Internal consistency error: Reached impossible place")
+// XXX Replaced by unreachable!()
+/*
+pub fn internal_fail() -> ! {
+	panic!("Internal consistency error: Reached impossible place");
 }
-
-pub fn fail_with_stack<S: AsRef<str> + Display>(stack: ExecuteStack, mesg: S) -> Result <(), String> {
+*/
+pub fn fail_with_stack(stack: ExecuteStack, mesg: &str) -> Result <(), String> {
     Err (format!("{}\n{}", mesg, value_util::stack_string(stack)))
 }
 
@@ -235,7 +237,7 @@ pub fn execute_step_with_frames(context: ExecuteContext, stack: ExecuteStack, fr
     	println!("    Step | Depth {}{} | State {} | Code {}",
 			stack_depth(stack),
 			if options::RUN.track_objects {
-				format!(" | Scope {}", pretty::dump_value(frame.scope))
+				format!(" | Scope {}", frame.scope)
 			} else {
 				"".to_string()
 			},
@@ -278,7 +280,7 @@ pub fn evaluate_token(context: ExecuteContext, stack: ExecuteStack, frame: Execu
         	let avalue = match frame.register { /* Unpack Value 1 from register */
                 RegisterState::LineStart (v, rat) |
                 RegisterState::FirstValue (v, rat, _) => (v, rat),
-                _ => internal_fail() /* If PairValue, should have branched off above */
+                _ => unreachable!(), /* If PairValue, should have branched off above */
             };
             /* "Return from frame" and recurse */
             return_to(context, more_frames, avalue)
@@ -300,7 +302,7 @@ pub fn evaluate_token_from_lines(context: ExecuteContext, stack: ExecuteStack, f
                 RegisterState::LineStart (v, rat) |
                 RegisterState::FirstValue (v, rat, _) =>
                 	RegisterState::LineStart (v, rat),
-                _ => internal_fail() /* Again: if PairValue, should have branched off above */
+                _ => unreachable!(), /* Again: if PairValue, should have branched off above */
 			};
             /* Replace current frame, new code sequence is rest-of-lines, and recurse */
             execute_step(context, {
@@ -324,7 +326,7 @@ pub fn evaluate_token_from_lines(context: ExecuteContext, stack: ExecuteStack, f
 pub fn return_to(context: ExecuteContext, stack_top: ExecuteStack, av: AnchoredValue) -> Value {
     /* Trace here ONLY if command line option requests it */
     if options::RUN.trace {
-    	println!("<-- {}", pretty::dump_value(av.0));
+    	println!("<-- {}", av.0);
     }
 
     /* Unpack the new stack. */
@@ -334,11 +336,10 @@ pub fn return_to(context: ExecuteContext, stack_top: ExecuteStack, av: AnchoredV
 
         /* Pull one frame off the stack so we can replace the register var and re-add it. */
         [past_return_frames.., ExecuteFrame {register: parent_register, code: parent_code, scope: parent_scope}] => {
-            let new_state = new_state_for(parent_register, av);
             execute_step(context, {
-            	let mut v = past_return_frames.clone();
+            	let mut v = past_return_frames.to_vec();
             	v.push(ExecuteFrame {
-		        	register: new_state,
+		        	register: new_state_for(parent_register, av),
 		        	code: parent_code,
 		        	scope: parent_scope
 		        });
@@ -357,11 +358,7 @@ pub fn evaluate_token_from_tokens(context: ExecuteContext, stack: ExecuteStack, 
     	let mut v = more_frames.clone();
     	v.push(ExecuteFrame {
 			register: register,
-			code: {
-				let mut vs = more_lines.clone();
-				vs.push(more_tokens);
-				vs
-			},
+			code: more_line.iter().cloned().chained(vec![more_tokens]).collect(),
 			scope: frame.scope
 		});
 		v
@@ -377,21 +374,21 @@ pub fn evaluate_token_from_tokens(context: ExecuteContext, stack: ExecuteStack, 
     let closure_value = |v| {
         let (ret, key) = match v.closure {
         	TokenClosureKind::ClosureWithBinding (r, k) => (r, k),
-        	_ => internal_fail()
+        	_ => unreachable!(),
         };
-        let scoped = v.kind == TokenGroupKind::Scoped;
-        simple_value(Value::Closure {
-        	exec: ClosureExecUser {
+        
+        simple_value(Value::Closure (ClosureValue {
+        	exec: ClosureExec::User {
         		body: v.items.clone(),
         		env_scope: frame.scope.clone(),
         		key: key,
-        		scoped: scoped,
+        		scoped: v.kind == TokenGroupKind::Scoped,
         		has_return: ret
         	},
         	bound: vec![],
         	this: ClosureThis::Blank,
         	need_args: key.len()
-        })
+        }))
     };
 
     /* Identify token */
@@ -421,7 +418,7 @@ pub fn evaluate_token_from_tokens(context: ExecuteContext, stack: ExecuteStack, 
                             	items: group.items
                             }));
                             let word = clone(token, TokenContents::Word (value::CURRENT_KEY_STRING));
-                            vec![ vec![wrapper_group], vec![word] ]
+                            vec![vec![wrapper_group], vec![word]]
                         }
                         _ => group.items,
                     };
@@ -467,7 +464,7 @@ pub fn evaluate_token_from_tokens(context: ExecuteContext, stack: ExecuteStack, 
 }
 
 /* apply item a to item b and return it to the current frame */
-pub fn apply(context: ExecuteContext, stack: ExecuteStack, this: Value, a, b: ()) -> Result<> {
+pub fn apply(context: ExecuteContext, stack: ExecuteStack, this: Value, a: Value, b: AnchoredValue) -> Result<> {
     /* FIXME: Document what *exactly* is the definition of b/bat? */
     let (bv, bat) = b;
     let r = |v| return_to(context, stack, (v, bat));
@@ -478,12 +475,12 @@ pub fn apply(context: ExecuteContext, stack: ExecuteStack, this: Value, a, b: ()
         (_, Some (Value::BuiltinMethod (f))) => r(Value::BuiltinFunction (f(this))),
         (_, Some (Value::BuiltinUnaryMethod (f))) => r(
             (try f(this) with
-                Failure (e) => failWithStack stack @@ format!("Runtime error, applying {} to {}: {}", pretty::dump_value(a), pretty::dump_value(bv), e)
+                Failure (e) => failWithStack stack @@ format!("Runtime error, applying {} to {}: {}", a, bv, e)
         )),
-        (Value::Object (_), Some (c @ ClosureValue {..})) => r(value_util::raw_rethis_super_from(this, c)),
+        (Value::Object (_), Some (c @ Value::Closure (_))) => r(value_util::raw_rethis_super_from(this, c)),
         (_, Some (v)) => r(v),
         (_, None) => match (a, value::table_get(t, value::PARENT_KEY)) {
-            (Value::Object (_), Some (parent @ ClosureValue _)) =>
+            (Value::Object (_), Some (parent @ Value::Closure (_))) =>
                 apply(context, stack, this, value_util::raw_rethis_super_from(this, parent), b),
             (_, Some (parent)) => apply(context, stack, this, parent, b),
             (_, None) => value_util::raw_misapply_stack(stack, this, bv),
@@ -503,11 +500,8 @@ pub fn apply(context: ExecuteContext, stack: ExecuteStack, this: Value, a, b: ()
         /* If applying a closure. */
         Value::Closure (c) => {
             let descend = |c| {
-                let bound = {
-                	let mut b = c.bound.clone();
-                	b.reverse();
-                	b
-                };
+                let b = c.bound.iter().cloned().rev().collect::<Vec<_>>();
+                
                 match c.exec {
                     ClosureExec::User (exec) => {
                         /* FIXME: should be a noscope operation for bound=[], this=None */
@@ -524,55 +518,53 @@ pub fn apply(context: ExecuteContext, stack: ExecuteStack, this: Value, a, b: ()
                         	println!("Closure --> {}", pretty::dump_value_new_table(scope));
                         }
 
-                        if let Value::Table (t) = scope {
+                        if let Value::Table(mut ref t) = scope {
                             fn add_bound(keys: Vec<String>, values: Vec<Value>) {
                                 match (&*keys, &*values) {
                                     ([], []) => {}
                                     ([rest_key.., key], [rest_value.., value]) => {
-                                        value::table_set(t, Value::Atom (key), value);
+                                        t.insert(Value::Atom (key), value);
                                         add_bound(rest_key, rest_value);
                                     }
-                                    _ => internal_fail()
+                                    _ => unreachable!(),
                             	}
                             }
+                            
                             let set_this = |current, this| {
-                                value::table_set(t, value::CURRENT_KEY, current);
-                                value::table_set(t, value::THIS_KEY, this);
-                                value::table_set(t, value::SUPER_KEY, value_util::make_super(current, this));
+                                t.insert(value::CURRENT_KEY.clone(), current);
+                                t.insert(value::THIS_KEY.clone(), this);
+                                t.insert(value::SUPER_KEY.clone(), value_util::make_super(current, this));
                             };
+                            
                             match c.this {
                                 ClosureThis::Current(c, t) |
                                 ClosureThis::Frozen(c, t) => set_this(c, t),
                                 _ => {}
                             }
-                            if let ClosureExec::User (ClosureExecUser {has_return: true, ..}) = c.exec {
-                            	value::table_set(t, value::RETURN_KEY, Value::Continuation (stack, bat));
+                            
+                            if let ClosureExec::User {has_return: true, ..} = c.exec {
+                            	t.insert(value::RETURN_KEY.clone(), Value::Continuation (stack, bat));
                             }
+                            
                             add_bound(key, bound);
                         } else {
-                        	internal_fail();
+                        	unreachable!();
                         }
-                        execute_step(context, {
-                        	let mut v = stack.clone();
-                        	v.push(stack_frame(scope, exec.body, bat));
-                        	v
-                        })
+                        
+                        execute_step(context, stack.iter().cloned().chained(vec![stack_frame(scope, exec.body, bat)]).collect())
                     }
 		            ClosureExec::Builtin (f) =>
 		                r(try (f bound) with
 		                    Failure e => failWithStack stack @@ "Runtime error, applying builtin closure to arguments ["^ (String.concat ", " @@ List.map Pretty.dumpValue bound) ^"]: " ^ e)
                 }
             };
+            
             match c.need_args {
                 0 => descend(c), /* Apply discarding argument */
                 count => {
                     let amended_closure = ClosureValue {
                     	need_args: count - 1,
-                        bound: {
-                        	let mut v = c.bound.clone();
-                        	v.push(bv);
-                        	v
-                        },
+                        bound: c.bound.iter().cloned().chained(vec![bv]).collect(),
                         ..c
                     };
                     match count {
@@ -599,7 +591,7 @@ pub fn apply(context: ExecuteContext, stack: ExecuteStack, this: Value, a, b: ()
         /* If applying a builtin special. */
         Value::BuiltinFunction (f) => r(match f(bv) {
             Err(ocaml::Failure (e)) =>
-            	fail_with_stack(stack, format!("Runtime error, applying builtin function to {}: {}", pretty::dump_value(bv), e)),
+            	fail_with_stack(stack, &format!("Runtime error, applying builtin function to {}: {}", bv, e)),
             Err(e) => return Err(e),
             Ok(v) => v,
         }),
@@ -607,7 +599,7 @@ pub fn apply(context: ExecuteContext, stack: ExecuteStack, this: Value, a, b: ()
             f(context, stack, b),
         /* Unworkable -- all builtin method values should be erased by readTable */
         Value::BuiltinMethod (_) | Value::BuiltinUnaryMethod (_) | Value::UserMethod (_) =>
-        	internal_fail(),
+        	unreachable!(),
     }
 }
 

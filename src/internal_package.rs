@@ -14,25 +14,25 @@ use value::{
 };
 use value_util::TableType;
 
-fn table_pair() -> (TableType, Value) {
+pub fn table_pair() -> (TableType, Value) {
 	let table = value_util::table_blank(TableBlankKind::NoSet);
 	let value = Value::Table (table);
 	(table, value)
 }
 
 /* Sign-of-divisor modulus */
-fn modulus(a: f64, b: f64) -> f64 {
+pub fn modulus(a: f64, b: f64) -> f64 {
 	(a % b + b) % b
 }
 
 lazy_static! {
-	pub static ref TRUEFN_VALUE : Value = Value::BuiltinFunction (|x| Value::True);
+	pub static ref TRUEFN_VALUE: Value = Value::BuiltinFunction (|x| Value::True);
 	
-	pub static ref INTERNAL_TABLE : TableType = value_util::table_blank(TableBlankKind::NoSet);
-	pub static ref INTERNAL_VALUE : Value = Value::Table (INTERNAL_TABLE);
+	pub static ref INTERNAL_TABLE: TableType = value_util::table_blank(TableBlankKind::NoSet);
+	pub static ref INTERNAL_VALUE: Value = Value::Table (INTERNAL_TABLE);
 }
 
-fn fake_register_location(name: &'static str) -> CodePosition {
+pub fn fake_register_location(name: &'static str) -> CodePosition {
 	CodePosition {
 		file_name: CodeSource::Internal (name),
 		line_number: 0,
@@ -40,7 +40,7 @@ fn fake_register_location(name: &'static str) -> CodePosition {
 	}
 }
 
-fn fake_register_from(reg: RegisterState) -> ExecuteFrame {
+pub fn fake_register_from(reg: RegisterState) -> ExecuteFrame {
 	ExecuteFrame {
 		register: reg,
 		scope: Value::Null,
@@ -48,11 +48,11 @@ fn fake_register_from(reg: RegisterState) -> ExecuteFrame {
 	}
 }
 
-static START : Once = ONCE_INIT;
+static START: Once = ONCE_INIT;
 
 START.call_once(|| {
-	let set_atom_value = |table, name, v| Value::table_set(table.unwrap_or(INTERNAL_TABLE), Value::Atom (name), v);
-	let set_atom_fn = |table, n, func| set_atom_value(table, n, Value::BuiltinFunction (func));
+	let set_atom_value = |table, name, v| table.unwrap_or(INTERNAL_TABLE).insert(Value::Atom(name), v);
+	let set_atom_fn = |table, n, func| set_atom_value(table, n, Value::BuiltinFunction(func));
 	/* let set_atom_handoff = |table, n, func| set_atom_value(table, n, Value::BuiltinHandoff (func));*/
 	let set_atom_binary = |table, n, func| set_atom_value(table, n, value_util::snippet_closure(2, |x| match &*x {
 		[a, b] => func(a, b),
@@ -65,9 +65,11 @@ START.call_once(|| {
 	};
 
 	/* FIXME: At some point consolidate all these adhoc functions in one place. */
-	let internal_fail = || failwith "Internal consistency error: Reached impossible place";
+	// XXX Replaced by unreachable!()
+	// let internal_fail = || panic!("Internal consistency error: Reached impossible place");
 
 	/* Create a function that consumes an argument, then returns itself. `func` should return void */
+	// TODO
 	fn reusable<F: Fn(Value)>(func: F) -> fn(Value) -> Value {
 		fn inner(arg: Value) {
 			func(arg);
@@ -88,13 +90,13 @@ START.call_once(|| {
 	set_atom_value(None, "thisUpdate", value_util::RETHIS_SUPER_FROM);
 
 	set_atom_value(None, "setPropertyKey", value_util::snippet_closure(3, |x| match &*x {
-		[Value::Table (t), k, v] |
-		[Value::Object (t), k, v] => {
-			value::table_set(t, k, Value::UserMethod (v));
+		[Value::Table (mut ref t), k, v] |
+		[Value::Object (mut ref t), k, v] => {
+			t.insert(k, Value::UserMethod (v));
 			Value::Null
 		}
 		[_, _, _] => failwith "Attempted to call setPropertyKey on something other than an object",
-		_ => internal_fail()
+		_ => unreachable!(),
 	}));
 
 	set_atom_value(None, "fail", Value::BuiltinHandoff (|_, stack, value| {
@@ -109,11 +111,11 @@ START.call_once(|| {
 	/* All this really does is convert options::RUN.args into an Emily list */
 	set_atom_value(None, "getArgs", Value::BuiltinHandoff (|context, stack, (_, at)| {
 		let o = value_util::object_blank(context);
-		let ot = value::table_from(o);
+		let mut ot = value::table_from(o);
 		let ref args = options::RUN.args;
-		value::table_set_string(ot, "count", Value::Float (args.len() as f64);
+		value::table_set_string(ot, "count", Value::Float(args.len() as f64);
 		for (i, st) in args.iter().enumerate() {
-			value::table_set(ot, Value::Float (i as f64), Value::String (st));
+			ot.insert(Value::Float (i as f64), Value::String(st));
 		}
 		execute::return_to(context, stack, (o, at))
 	}));
@@ -129,13 +131,13 @@ START.call_once(|| {
 	let set_atom_math = |table, name, f| set_atom_value(Some (table.unwrap_or(double_table)), name, value_util::snippet_closure(2, |x| match &*x {
 		[Value::Float (f1), Value::Float (f2)] => Value::Float (f(f1, f2)),
 		[Value::Float (_), _] => failwith "Don't know how to combine that with a number",
-		_ => internal_fail ()
+		_ => unreachable!(),
 	}));
 
 	let set_atom_test = |table, name, f| set_atom_value(Some (table.unwrap_or(double_table)), name, value_util::snippet_closure(2, |x| match &*x {
 		[Value::Float (f1), Value::Float (f2)] => value_util::bool_cast(f(f1, f2)),
 		[Value::Float (_), _] => failwith "Don't know how to compare that to a number",
-		_ => internal_fail ()
+		_ => unreachable!(),
 	}));
 
 	let set_atom_math_fn = |table, name, f| set_atom_fn(Some (table.unwrap_or(double_table)), name, |x| match x {
@@ -212,7 +214,7 @@ START.call_once(|| {
 	set_atom_value(Some (string_table), "concat", value_util::snippet_closure(2, |x| match &*x {
 		[Value::String (f1), Value::String (f2)] => Value::String (format!("{}{}", f1, f2)),
 		[Value::String (_), _] => failwith "Don't know how to combine that with a string",
-		_ => internal_fail()
+		_ => unreachable!(),
 	}));
 
 	/* "Submodule" internal.type */
@@ -233,7 +235,7 @@ START.call_once(|| {
 			let table = value_util::table_blank(TableBlankKind::NoSet);
 			let set_ffi_param = |what, func| value::table_set_string(table, what, Value::BuiltinFunction (|a| match a {
 				Value::Atom (s) | Value::String (s) => { func(s); Value::Null }
-				x => failwith @@ format!("Need key {} for ffi {}; expected string or atom", pretty::dump_value(x), what)
+				x => failwith @@ format!("Need key {} for ffi {}; expected string or atom", x, what)
 			}));
 			set_ffi_param("name", |s| foreigner.name = Some (s));
 			set_ffi_param("return", |s| foreigner.returning = s);

@@ -87,7 +87,7 @@ pub fn box_sub_starter(starter: ExecuteStarter, kind: BoxSpec) -> ExecuteStarter
 pub fn starter_for_execute(starter: ExecuteStarter, project: Option<Value>, directory: Option<Value>) -> ExecuteStarter {
     let (table, sub_starter) = sub_starter_pair(None, starter);
     value::table_set_option(table, value::PROJECT_KEY, project);
-    value::table_set(table, value::DIRECTORY_KEY, match directory {
+    table.insert(value::DIRECTORY_KEY, match directory {
 		Some(d) => d,
 		None => Value::Table(value_util::table_blank(TableBlankKind::NoSet)),
 	});

@@ -60,6 +60,8 @@ pub enum Value {
     /* Complex user-created values */
     
 	/* Is this getting kind of complicated? Should curry be wrapped closures? Should callcc be separate? */
+	// XXX Note to self: STOP TRYING TO INTEGRATE ClosureValue INTO Value!!!
+	// It's more convenient if you just... don't.
 	Closure (ClosureValue),
 	UserMethod (Box<Value>),
 	Table (Box<TableValue>),
@@ -67,14 +69,14 @@ pub enum Value {
 	Continuation (ExecuteStack, token::CodePosition), /* CodePosition only needed for traceback */
 }
 
-/* Used for implementing OCaml's equality rules
-	Note: PartialEq should NOT be implemented like this. This is just temporary. Maybe. */
+// Used for implementing OCaml's equality rules
+// Note: PartialEq should NOT be implemented like this. This is just temporary. Maybe.
 impl PartialEq for Value {
 	fn eq(&self, other: &Value) -> bool {
 		match (self, other) {
 			(&Value::Null, &Value::Null) => true,
 			(&Value::True, &Value::True) => true,
-			_ => self as *const Value == other as *const Value
+			_ => self as *const Value == other as *const Value,
 		}
 	}
 }
@@ -83,6 +85,26 @@ impl Hash for Value {
 	fn hash<H: Hasher>(&self, hasher: &mut H) {
 		// TODO: implement
 		unimplemented!()
+	}
+}
+
+// Thoughts: implementation should be in Display, and ToString should use THAT to get
+// its value. Right now it's backwards, since it's more convenient because current
+// implementation will have a String object already allocated, so we can just use that.
+impl ToString for Value {
+	fn to_string(&self) -> String {
+		let wrapper: &Fn(String, &Value) -> String = if options::RUN.track_objects {
+			pretty::label_wrapper
+		} else {
+			pretty::simple_wrapper
+		};
+		pretty::dump_value_tree_general(wrapper, v)
+	}
+}
+
+impl Display for Value {
+	fn fmt(&self, f: &mut Formatter) {
+		f.write_str(&self.to_string());
 	}
 }
 
@@ -99,9 +121,9 @@ pub enum RegisterState {
    is effectively an instruction pointer. */
 #[derive(Clone)]
 pub struct ExecuteFrame {
-    register : RegisterState,
-    code : token::CodeSequence,
-    scope: Value
+    register: RegisterState,
+    code:     token::CodeSequence,
+    scope:    Value,
 }
 
 /* The current state of an execution thread consists of just the stack of frames. */
@@ -180,14 +202,6 @@ pub fn table_get(table: &TableValue, key: &Value) -> Option<Value> {
 	table.get(key).cloned()
 }
 
-pub fn table_set(table: &mut TableValue, key: Value, value: Value) {
-	table.insert(key, value);
-}
-
-pub fn table_has(table: &mut TableValue, key: &Value) -> bool {
-	table.contains_key(key)
-}
-
 pub fn table_set_string(table: &mut TableValue, key: String, value: Value) {
 	table.insert(Value::Atom (key), value);
 }
@@ -201,6 +215,6 @@ pub fn table_set_option(table: &mut TableValue, key: Value, value: Option<Value>
 pub fn table_from(value: Value) -> Result<TableValue, ocaml::Failure> {
 	match value {
 		Value::Table (v) | Value::Object (v) => Ok(v),
-		_ => Err(ocaml::Failure("Internal error-- interpreter accidentally treated a non-object as an object in a place this should have been impossible.".to_string()))
+		_ => Err(ocaml::Failure ("Internal error-- interpreter accidentally treated a non-object as an object in a place this should have been impossible.".to_string()))
 	}
 }
