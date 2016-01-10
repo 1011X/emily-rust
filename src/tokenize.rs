@@ -5,10 +5,12 @@
    The parts we'd think of a "parser" as usually doing will be handled in a second,
    currently unimplemented, macro-processing step. */
 
-/* Tokenize uses sedlex which is inherently stateful, so tokenize for a single source string is stateful.
-   This is the basic state for a file parse-- it basically just records the position of the last seen newline. */
+extern crate regex_syntax;
 
-extern crate regex;
+use regex_syntax::{
+	Expr,
+	Repeater
+};
 
 use token::{
 	CodePosition,
@@ -18,6 +20,9 @@ use token::{
 	
 	CompilationError,
 };
+
+/* Tokenize uses sedlex which is inherently stateful, so tokenize for a single source string is stateful.
+   This is the basic state for a file parse-- it basically just records the position of the last seen newline. */
 
 struct TokenizeState {
 	line_start: isize,
@@ -40,19 +45,50 @@ pub fn group_close_human_readable(kind: &GroupCloseToken) -> String {
 // Error: CompilationError + Failure
 pub fn tokenize(enclosingKind: TokenGroupKind, name: CodeSource, buf) -> Result<Token, Error> {
     /* -- Helper regexps -- */
-    // let digit = Regex::new("[:digit:]").unwrap();
-    let number = Regex::new("[:digit:]+").unwrap();
-    // let octalDigit = Regex::new("[0-7]").unwrap();
-    let octalNumber = Regex::new("0o[0-7]+").unwrap();
-    let hexDigit = Regex::new("[:digit:]|[a-fA-F]").unwrap();
-    let hexNumber = Regex::new("0x[0-9A-Fa-f]").unwrap();
-    let binaryNumber = Regex::new("0b[01]+").unwrap();
-    let letterPattern = Regex::new("[:alpha:]").unwrap();
-    let wordPattern = Regex::new("[:alpha:][:alnum:]*").unwrap();
-    let sciNotation = Regex::new("[eE][-+]?[:digit:]").unwrap();
-    let floatPattern = Regex::new(r"\.[:digit:]+|[:digit:]+(?:.+)?").unwrap();
-    // TODO: implement
-    // let numberPattern = Regex::new(r"").unwrap();
+    //let digit = Expr::parse("[0-9]").unwrap();
+    let number = Expr::parse("[:digit:]+").unwrap();
+    let octal_digit = Expr::parse("[0-7]").unwrap();
+    let octal_number = Expr::parse("0o[0-7]+").unwrap();
+    let hex_digit = Expr::parse("[0-9a-fA-F]").unwrap();
+    let hex_number = Expr::parse("0x[:xdigit:]+").unwrap();
+    let binary_number = Expr::parse("0b[01]+").unwrap();
+    let letter_pattern = Expr::parse("[:alpha:]").unwrap();
+    let word_pattern = Expr::parse("[:alpha:][:alnum:]*").unwrap();
+    let sci_notation = Expr::parse("[eE][-+]?[:digit:]").unwrap();
+    let float_pattern = Expr::Alternate (vec![
+    	Expr::Concat (vec![
+    		Expr::Literal {
+    			chars: vec!['.'],
+    			casei: true
+			},
+			number.clone(),
+		]),
+		Expr::Concat (vec![
+			number.clone(),
+			Expr::Repeat {
+				e: Box::new(Expr::Concat (vec![
+					Expr::Literal {
+						chars: vec!['.'],
+						casei: true
+					},
+					number.clone(),
+				])),
+				r: Repeater::ZeroOrOne,
+				greedy: true,
+			},
+			Expr::Repeat {
+				e: Box::new(sci_notation.clone()),
+				r: Repeater::ZeroOrOne,
+				greedy: true,
+			},
+		]),
+	]);
+	let number_pattern = Expr::Alternate (vec![
+		hex_number.clone(),
+		octal_number.clone(),
+		float_pattern.clone(),
+		binary_number.clone(),
+	]);
     
     
     /* Helper function: We treat a list as a stack by appending elements to the beginning,
@@ -68,6 +104,7 @@ pub fn tokenize(enclosingKind: TokenGroupKind, name: CodeSource, buf) -> Result<
         if options::RUN.step_macro { 
             println!("-- Macro processing for {}", name);
         }
+        
         macros::process(cleanup(l))
     };
 
@@ -79,7 +116,7 @@ pub fn tokenize(enclosingKind: TokenGroupKind, name: CodeSource, buf) -> Result<
         state.line_start = Sedlexing.lexeme_end(buf);
         state.line += 1;
     };
-    /* Use tokenizer state to translate sedlex position into a codePosition */
+    /* Use tokenizer state to translate sedlex position into a CodePosition */
     let current_position = || CodePosition {
         file_name:   name,
         line_number: state.line,
@@ -93,12 +130,16 @@ pub fn tokenize(enclosingKind: TokenGroupKind, name: CodeSource, buf) -> Result<
 
     /* Sub-parser: double-quoted strings. Call after seeing opening quote mark */
     let quoted_string = || {
+    	
         /* This parser works by statefully adding chars to a string buffer */
-        let mut accum = String::with_capacity(1);
+        let mut accum = String::new();
+        
         /* Helper function adds a literal string to the buffer */
         let add = |s| accum.push_str(s);
+        
         /* Helper function adds a sedlex match to the buffer */
         let add_buf = || add(Sedlexing.Utf8.lexeme(buf));
+        
         /* Operate */
         fn proceed() -> Result<> {
             /* Call after seeing a backslash. Matches one character, returns string escape corresponds to. */
@@ -108,30 +149,32 @@ pub fn tokenize(enclosingKind: TokenGroupKind, name: CodeSource, buf) -> Result<
                 'n'  => Ok("\n"),
                 _    => Err(parse_fail("Unrecognized escape sequence").unwrap_err()) /* TODO: devour newlines */
             };
+            
             /* Chew through until quoted string ends */
-            match buf {
-                /* Treat a newline like any other char, but since sedlex doesn't track lines, we have to record it */
-                '\n' => {
-                    state_newline();
-                    add_buf();
-                    proceed()
-                }
-                /* Backslash found, trigger escape handler */
-                '\\' => {
-                	add(escaped_char());
-                	proceed()
-                }
-                /* Unescaped quote found, we are done. Return the data from the buffer. */
-                '"' => Ok(accum),
-                /* User probably did not intend for string to run to EOF. */
-                eof => Err(incomplete_fail("Reached end of file inside string. Missing quote?").unwrap_err()),
-                /* Any normal character add to the buffer and proceed. */
-                any => {
-                	add(Sedlexing.Utf8.lexeme(buf));
-                	proceed()
-                }
-                _ => unreachable!()
-            }
+            for oc in buf.chars() {
+		        match oc {
+		            /* Treat a newline like any other char, but since sedlex doesn't track lines, we have to record it */
+		            Some ('\n') => {
+		                state_newline();
+		                add_buf();
+		            }
+		            
+		            /* Backslash found, trigger escape handler */
+		            Some ('\\') => add(escaped_char()),
+		            
+		            /* Unescaped quote found, we are done. Return the data from the buffer. */
+		            Some ('"') => break,
+		            
+		            /* User probably did not intend for string to run to EOF. */
+		            None =>
+		            	Err (incomplete_fail("Reached end of file inside string. Missing quote?").unwrap_err()),
+		            
+		            /* Any normal character add to the buffer and proceed. */
+		            Some (_) => add(Sedlexing.Utf8.lexeme(buf)),
+		        }
+	        }
+	        
+	        Ok (accum)
         };
         proceed()
     };
@@ -242,7 +285,7 @@ pub fn tokenize(enclosingKind: TokenGroupKind, name: CodeSource, buf) -> Result<
             ('#', Star (Compl '\n')) => skip(),
 
             /* On ANY group-close symbol, we end the current group */
-            closePattern => {
+            close_pattern => {
                 /* However, we have to check to make sure that the symbol matches */
                 let candidate_close = group_close_under_token();
                 /* The expected group close comes packed with the position of the opening symbol */
@@ -267,10 +310,10 @@ pub fn tokenize(enclosingKind: TokenGroupKind, name: CodeSource, buf) -> Result<
 
             /* Floating point number */
             // FIXME: try parse
-            floatPattern => add_single(|x| TokenContents::Number (try!(x.parse::<f64>()))),
+            float_pattern => add_single(|x| TokenContents::Number (try!(x.parse::<f64>()))),
 
             /* Local scope variable */
-            wordPattern => add_single(|x| TokenContents::Word (x)),
+            word_pattern => add_single(|x| TokenContents::Word (x)),
 
             /* Line demarcator */
             ';' => new_line_proceed(),
@@ -291,7 +334,7 @@ pub fn tokenize(enclosingKind: TokenGroupKind, name: CodeSource, buf) -> Result<
             '(' => add_to_line_proceed(open_ordinary_group(TokenGroupKind::Plain)),
             '{' => add_to_line_proceed(open_ordinary_group(TokenGroupKind::Scoped)),
             '[' => add_to_line_proceed(open_ordinary_group(TokenGroupKind::Box (BoxKind::NewObject))),
-            Plus(Compl(Chars "#()[]{}\\;\""|digit|letterPattern|white_space))
+            Plus(Compl(Chars "#()[]{}\\;\""|digit|letter_pattern|white_space))
                => add_single(|x| TokenContents::Symbol (x)),
             _ => Err(parse_fail("Unexpected character").unwrap_err()) /* Probably not possible? */
         }

@@ -120,7 +120,7 @@ pub fn id_string_for_value(v: &Value) -> String {
 	}
 }
 
-pub fn dump_value_tree_general(wrapper: fn(String, &Value) -> String, v: &Value) -> String {
+pub fn dump_value_tree_general(wrapper: fn(&str, &Value) -> String, v: &Value) -> String {
     match *v {
         Value::Null => "<null>".to_string(),
         Value::True => "<true>".to_string(),

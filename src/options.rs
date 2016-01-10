@@ -9,10 +9,10 @@ use std::io;
 use std::process;
 use std::sync;
 
-static VERSION: &'static str = "0.3b";
+pub static VERSION: &'static str = "0.3b";
 
 lazy_static! {
-	static ref FULL_VERSION : String = format!("Emily language interpreter: Version {}", VERSION);
+	pub static ref FULL_VERSION: String = format!("Emily language interpreter: Version {}", VERSION);
 }
 
 pub enum ExecutionTarget {

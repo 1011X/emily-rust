@@ -162,39 +162,40 @@ pub struct ExecuteStarter {
 pub static mut ID_GENERATOR: f64 = 0.0;
 
 /* "Keywords" */
+pub static HAS_KEY_STRING        : &'static str = "has";
+pub static SET_KEY_STRING        : &'static str = "set";
+pub static LET_KEY_STRING        : &'static str = "let";
+pub static PARENT_KEY_STRING     : &'static str = "parent";
+pub static ID_KEY_STRING         : &'static str = "!id";
+pub static CURRENT_KEY_STRING    : &'static str = "current";
+pub static THIS_KEY_STRING       : &'static str = "this";
+pub static SUPER_KEY_STRING      : &'static str = "super";
+pub static RETURN_KEY_STRING     : &'static str = "return";
+pub static PACKAGE_KEY_STRING    : &'static str = "package";
+pub static PROJECT_KEY_STRING    : &'static str = "project";
+pub static DIRECTORY_KEY_STRING  : &'static str = "directory";
+pub static INTERNAL_KEY_STRING   : &'static str = "internal";
+pub static NONLOCAL_KEY_STRING   : &'static str = "nonlocal";
+pub static PRIVATE_KEY_STRING    : &'static str = "private";
+pub static EXPORT_LET_KEY_STRING : &'static str = "exportLet";
+
 lazy_static! {
-	pub static ref HAS_KEY_STRING        : String = "has".to_string();
-	pub static ref HAS_KEY               : Value  = Value::Atom (HAS_KEY_STRING);
-	pub static ref SET_KEY_STRING        : String = "set".to_string();
-	pub static ref SET_KEY               : Value  = Value::Atom (SET_KEY_STRING);
-	pub static ref LET_KEY_STRING        : String = "let".to_string();
-	pub static ref LET_KEY               : Value  = Value::Atom (LET_KEY_STRING);
-	pub static ref PARENT_KEY_STRING     : String = "parent".to_string();
-	pub static ref PARENT_KEY            : Value  = Value::Atom (PARENT_KEY_STRING);
-	pub static ref ID_KEY_STRING         : String = "!id".to_string();
-	pub static ref ID_KEY                : Value  = Value::Atom (ID_KEY_STRING);
-	pub static ref CURRENT_KEY_STRING    : String = "current".to_string();
-	pub static ref CURRENT_KEY           : Value  = Value::Atom (CURRENT_KEY_STRING);
-	pub static ref THIS_KEY_STRING       : String = "this".to_string();
-	pub static ref THIS_KEY              : Value  = Value::Atom (THIS_KEY_STRING);
-	pub static ref SUPER_KEY_STRING      : String = "super".to_string();
-	pub static ref SUPER_KEY             : Value  = Value::Atom (SUPER_KEY_STRING);
-	pub static ref RETURN_KEY_STRING     : String = "return".to_string();
-	pub static ref RETURN_KEY            : Value  = Value::Atom (RETURN_KEY_STRING);
-	pub static ref PACKAGE_KEY_STRING    : String = "package".to_string();
-	pub static ref PACKAGE_KEY           : Value  = Value::Atom (PACKAGE_KEY_STRING);
-	pub static ref PROJECT_KEY_STRING    : String = "project".to_string();
-	pub static ref PROJECT_KEY           : Value  = Value::Atom (PROJECT_KEY_STRING);
-	pub static ref DIRECTORY_KEY_STRING  : String = "directory".to_string();
-	pub static ref DIRECTORY_KEY         : Value  = Value::Atom (DIRECTORY_KEY_STRING);
-	pub static ref INTERNAL_KEY_STRING   : String = "internal".to_string();
-	pub static ref INTERNAL_KEY          : Value  = Value::Atom (INTERNAL_KEY_STRING);
-	pub static ref NONLOCAL_KEY_STRING   : String = "nonlocal".to_string();
-	pub static ref NONLOCAL_KEY          : Value  = Value::Atom (NONLOCAL_KEY_STRING);
-	pub static ref PRIVATE_KEY_STRING    : String = "private".to_string();
-	pub static ref PRIVATE_KEY           : Value  = Value::Atom (PRIVATE_KEY_STRING);
-	pub static ref EXPORT_LET_KEY_STRING : String = "exportLet".to_string();
-	pub static ref EXPORT_LET_KEY        : Value  = Value::Atom (EXPORT_LET_KEY_STRING);
+	pub static ref HAS_KEY        : Value = Value::Atom (HAS_KEY_STRING.to_string());
+	pub static ref SET_KEY        : Value = Value::Atom (SET_KEY_STRING.to_string());
+	pub static ref LET_KEY        : Value = Value::Atom (LET_KEY_STRING.to_string());
+	pub static ref PARENT_KEY     : Value = Value::Atom (PARENT_KEY_STRING.to_string());
+	pub static ref ID_KEY         : Value = Value::Atom (ID_KEY_STRING.to_string());
+	pub static ref CURRENT_KEY    : Value = Value::Atom (CURRENT_KEY_STRING.to_string());
+	pub static ref THIS_KEY       : Value = Value::Atom (THIS_KEY_STRING.to_string());
+	pub static ref SUPER_KEY      : Value = Value::Atom (SUPER_KEY_STRING.to_string());
+	pub static ref RETURN_KEY     : Value = Value::Atom (RETURN_KEY_STRING.to_string());
+	pub static ref PACKAGE_KEY    : Value = Value::Atom (PACKAGE_KEY_STRING.to_string());
+	pub static ref PROJECT_KEY    : Value = Value::Atom (PROJECT_KEY_STRING.to_string());
+	pub static ref DIRECTORY_KEY  : Value = Value::Atom (DIRECTORY_KEY_STRING.to_string());
+	pub static ref INTERNAL_KEY   : Value = Value::Atom (INTERNAL_KEY_STRING.to_string());
+	pub static ref NONLOCAL_KEY   : Value = Value::Atom (NONLOCAL_KEY_STRING.to_string());
+	pub static ref PRIVATE_KEY    : Value = Value::Atom (PRIVATE_KEY_STRING.to_string());
+	pub static ref EXPORT_LET_KEY : Value = Value::Atom (EXPORT_LET_KEY_STRING.to_string());
 }
 
 // Really needed?
@@ -202,8 +203,8 @@ pub fn table_get(table: &TableValue, key: &Value) -> Option<Value> {
 	table.get(key).cloned()
 }
 
-pub fn table_set_string(table: &mut TableValue, key: String, value: Value) {
-	table.insert(Value::Atom (key), value);
+pub fn table_set_string(table: &mut TableValue, key: &'static str, value: Value) {
+	table.insert(Value::Atom (key.to_string()), value);
 }
 
 pub fn table_set_option(table: &mut TableValue, key: Value, value: Option<Value>) {
@@ -214,7 +215,7 @@ pub fn table_set_option(table: &mut TableValue, key: Value, value: Option<Value>
 
 pub fn table_from(value: Value) -> Result<TableValue, ocaml::Failure> {
 	match value {
-		Value::Table (v) | Value::Object (v) => Ok(v),
-		_ => Err(ocaml::Failure ("Internal error-- interpreter accidentally treated a non-object as an object in a place this should have been impossible.".to_string()))
+		Value::Table (v) | Value::Object (v) => Ok (v),
+		_ => Err (ocaml::Failure ("Internal error-- interpreter accidentally treated a non-object as an object in a place this should have been impossible.".to_string()))
 	}
 }
