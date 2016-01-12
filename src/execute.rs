@@ -42,12 +42,6 @@ pub fn dump_register_state(register_state: &RegisterState) -> String {
 	}
 }
 
-/* FIXME: I wonder if there's a existing function for this in List or something. */
-// lol
-pub fn stack_depth(stack: ExecuteStack) -> usize {
-	stack.len()
-}
-
 /* -- PRACTICAL HELPERS -- */
 
 type AnchoredValue = (Value, CodePosition);
@@ -235,7 +229,7 @@ pub fn execute_step_with_frames(context: ExecuteContext, stack: ExecuteStack, fr
     /* Trace here ONLY if command line option requests it */
     if options::RUN.trace {
     	println!("    Step | Depth {}{} | State {} | Code {}",
-			stack_depth(stack),
+			stack.len(),
 			if options::RUN.track_objects {
 				format!(" | Scope {}", frame.scope)
 			} else {
