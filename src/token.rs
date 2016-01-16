@@ -66,14 +66,14 @@ pub enum BoxKind { NewObject, NewScope }
 pub enum TokenGroupKind {
 	Plain,               /* Parenthesis */
 	Scoped,              /* Create a new scope within this group */
-	Box (BoxKind)        /* Create a new object */
+	Box (BoxKind),       /* Create a new object */
 }
 
 /* Is this group a closure? What kind? */
 #[derive(Clone)]
 pub enum TokenClosureKind {
-	NonClosure,                               /* Is not a function */
-	ClosureWithBinding (bool, Vec<String>)    /* Function with argument-- arg is return?,args */
+	NonClosure,                             /* Is not a function */
+	ClosureWithBinding (bool, Vec<String>), /* Function with argument-- arg is return?,args */
 }
 
 /* Representation of a tokenized code blob. */
@@ -83,28 +83,28 @@ pub type CodeSequence = Vec<Vec<Token>>;
 
 #[derive(Clone)]
 pub struct TokenGroup {
-	kind: TokenGroupKind,      /* Group kind */
-	closure: TokenClosureKind,  /* Closure kind, if any */
-	group_initializer: Vec<Token>,    /* Used to create scope */
-	items: CodeSequence /* Group is a list of lines, lines are a list of tokens */
+	kind: TokenGroupKind,          /* Group kind */
+	closure: TokenClosureKind,     /* Closure kind, if any */
+	group_initializer: Vec<Token>, /* Used to create scope */
+	items: CodeSequence,           /* Group is a list of lines, lines are a list of tokens */
 }
 
 /* Data content of a token */
 #[derive(Clone)]
-pub enum TokenContents {
-	Word (String),   /* Alphanum */
-	Symbol (String), /* Punctuation-- appears pre-macro only. */
-	String (String), /* "Quoted" */
-	Atom (String),   /* Ideally appears post-macro only */
+pub enum TokenContents<'a> {
+	Word (&'a str),   /* Alphanum */
+	Symbol (&'a str), /* Punctuation-- appears pre-macro only. */
+	String (&'a str), /* "Quoted" */
+	Atom (&'a str),   /* Ideally appears post-macro only */
 	Number (f64),
-	Group (TokenGroup)
+	Group (TokenGroup),
 }
 
 /* A token. Effectively, an AST node. */
 #[derive(Clone)]
 pub struct Token {
 	at: CodePosition,
-	contents: TokenContents
+	contents: TokenContents,
 }
 
 /* Quick constructor for token */
@@ -113,8 +113,6 @@ pub fn make_token(position: &CodePosition, contents: &TokenContents) -> Token {
 		at: position.clone(),
 		contents: contents.clone()
 	}
-	make_token(position, contents)
-	Token {at: position, contents}
 }
 
 /* Quick constructor for token, group type */
@@ -123,7 +121,7 @@ pub fn make_group(position: &CodePosition, closure: &TokenClosureKind, kind: &To
     	kind: kind.clone(),
     	closure: closure.clone(),
     	group_initializer: group_initializer.clone(),
-    	items: items.clone()
+    	items: items.clone(),
     }))
 }
 
@@ -169,6 +167,7 @@ impl Token {
 }
 */
 
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum TokenFailureKind {
 	IncompleteError,
 	InvalidError,
@@ -185,13 +184,13 @@ impl fmt::Display for CompilationError {
 }
 
 pub fn incomplete_at(at: &CodePosition, mesg: &str) -> Result<(), CompilationError> {
-	Err(CompilationError (IncompleteError, at.clone(), mesg.to_string()))
+	Err (CompilationError (TokenFailureKind::IncompleteError, at.clone(), mesg.to_string()))
 }
 
 pub fn fail_at(at: &CodePosition, mesg: &str) -> Result<(), CompilationError> {
-	Err(CompilationError (InvalidError, at.clone(), mesg.to_string()))
+	Err (CompilationError (TokenFailureKind::InvalidError, at.clone(), mesg.to_string()))
 }
 
-pub fn fail_token(at: &Token, mesg: &String) -> Result<(), CompilationError> {
-	fail_at(&at.at, &mesg)
+pub fn fail_token(at: &Token, mesg: &str) -> Result<(), CompilationError> {
+	fail_at(&at.at, mesg)
 }

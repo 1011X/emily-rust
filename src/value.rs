@@ -6,19 +6,17 @@ extern crate lazy_static;
 use std::collections::HashMap;
 use std::hash::Hasher;
 
-use token;
-
 pub type TableValue = HashMap<Value, Value>;
 
 /* Closure types: */
 #[derive(Clone)]
 pub struct ClosureExecUser {
-	body       : token::CodeSequence,
-	scoped     : bool,  /* Should the closure execution get its own let scope? */
-	env_scope  : Box<Value>, /* Captured scope environment of closure manufacture */
+	body: token::CodeSequence,
+	scoped: bool,             /* Should the closure execution get its own let scope? */
+	env_scope: Value,         /* Captured scope environment of closure manufacture */
 	/* Another option would be to make the "new" scope early & excise 'key': */
-	key        : Vec<String>, /* Not-yet-curried keys, or [] as special for "this is nullary" -- BACKWARD, first-applied key is last */
-	has_return : bool    /* Should the closure execution get its own "return" continuation? */
+	key: Vec<String>,         /* Not-yet-curried keys, or [] as special for "this is nullary" -- BACKWARD, first-applied key is last */
+	has_return: bool          /* Should the closure execution get its own "return" continuation? */
 }
 
 #[derive(Clone)]
@@ -29,20 +27,20 @@ pub enum ClosureExec {
 
 #[derive(Clone)]
 pub enum ClosureThis {
-	Blank,     /* Newly born closure */
-	Never,     /* Closure is not a method and should not receive a this. */
-	Current (Box<Value>, Box<Value>), /* Closure is a method, has a provisional current/this. */
-	Frozen (Box<Value>, Box<Value>),  /* Closure is a method, has a final, assigned current/this. */
+	Blank,                  /* Newly born closure */
+	Never,                  /* Closure is not a method and should not receive a this. */
+	Current (Value, Value), /* Closure is a method, has a provisional current/this. */
+	Frozen (Value, Value),  /* Closure is a method, has a final, assigned current/this. */
 }
 
 pub struct ClosureValue {
-	exec     : ClosureExec,
+	exec: ClosureExec,
 	need_args: usize,      /* Count this down as more values are added to bound */
-	bound    : Vec<Value>, /* Already-curried values -- BACKWARD, first application last */
-	this     : ClosureThis, /* Tracks the "current" and "this" bindings */
+	bound: Vec<Value>,     /* Already-curried values -- BACKWARD, first application last */
+	this: ClosureThis,     /* Tracks the "current" and "this" bindings */
 }
 
-#[derive(Clone, Eq)]
+#[derive(Eq)]
 pub enum Value {
     /* "Primitive" values */
 	Null,
@@ -60,12 +58,13 @@ pub enum Value {
     /* Complex user-created values */
     
 	/* Is this getting kind of complicated? Should curry be wrapped closures? Should callcc be separate? */
+	
 	// XXX Note to self: STOP TRYING TO INTEGRATE ClosureValue INTO Value!!!
 	// It's more convenient if you just... don't.
 	Closure (ClosureValue),
 	UserMethod (Box<Value>),
-	Table (Box<TableValue>),
-	Object (Box<TableValue>), /* Same as Value::Table but treats 'this' different */
+	Table (TableValue),
+	Object (TableValue), /* Same as Value::Table but treats 'this' different */
 	Continuation (ExecuteStack, token::CodePosition), /* CodePosition only needed for traceback */
 }
 
@@ -74,7 +73,7 @@ pub enum Value {
 impl PartialEq for Value {
 	fn eq(&self, other: &Value) -> bool {
 		match (self, other) {
-			(&Value::Null, &Value::Null) => true,
+			(&Value::Null, &Value::Null) |
 			(&Value::True, &Value::True) => true,
 			_ => self as *const Value == other as *const Value,
 		}
@@ -88,12 +87,16 @@ impl Hash for Value {
 	}
 }
 
+impl Clone for Value {
+	
+}
+
 // Thoughts: implementation should be in Display, and ToString should use THAT to get
 // its value. Right now it's backwards, since it's more convenient because current
 // implementation will have a String object already allocated, so we can just use that.
 impl ToString for Value {
 	fn to_string(&self) -> String {
-		let wrapper: &Fn(String, &Value) -> String = if options::RUN.track_objects {
+		let wrapper: fn(String, &Value) -> String = if options::RUN.track_objects {
 			pretty::label_wrapper
 		} else {
 			pretty::simple_wrapper
@@ -110,7 +113,6 @@ impl Display for Value {
 
 /* The "registers" are values 1 and 2 described in execute.rs comments */
 /* The CodePositions are (1) the root of the current group (2) the symbol yielding "value 2" */
-#[derive(Clone)]
 pub enum RegisterState {
 	LineStart (Value, token::CodePosition),
 	FirstValue (Value, token::CodePosition, token::CodePosition),
@@ -119,7 +121,6 @@ pub enum RegisterState {
 
 /* Each frame on the stack has the two value "registers" and a codeSequence reference which
    is effectively an instruction pointer. */
-#[derive(Clone)]
 pub struct ExecuteFrame {
     register: RegisterState,
     code:     token::CodeSequence,
@@ -129,7 +130,6 @@ pub struct ExecuteFrame {
 /* The current state of an execution thread consists of just the stack of frames. */
 pub type ExecuteStack = Vec<ExecuteFrame>;
 
-#[derive(Clone)]
 pub struct ExecuteContext {
     null_proto   : Value,
     true_proto   : Value,
@@ -148,7 +148,6 @@ pub enum TableBlankKind {
 }
 
 /* For making a scope inside an object literal */
-#[derive(Clone)]
 pub enum TableBoxKind {
 	BoxNew (token::BoxKind),
 	BoxValue (Value)
@@ -199,10 +198,6 @@ lazy_static! {
 }
 
 // Really needed?
-pub fn table_get(table: &TableValue, key: &Value) -> Option<Value> {
-	table.get(key).cloned()
-}
-
 pub fn table_set_string(table: &mut TableValue, key: &'static str, value: Value) {
 	table.insert(Value::Atom (key.to_string()), value);
 }
@@ -215,7 +210,8 @@ pub fn table_set_option(table: &mut TableValue, key: Value, value: Option<Value>
 
 pub fn table_from(value: Value) -> Result<TableValue, ocaml::Failure> {
 	match value {
-		Value::Table (v) | Value::Object (v) => Ok (v),
+		Value::Table (v) |
+		Value::Object (v) => Ok (v),
 		_ => Err (ocaml::Failure ("Internal error-- interpreter accidentally treated a non-object as an object in a place this should have been impossible.".to_string()))
 	}
 }

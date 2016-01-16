@@ -29,10 +29,9 @@ pub fn name_atom(filename: String) -> Value {
 }
 
 /* See also path.ml */
-pub static DEFAULT_PACKAGE_PATH: PathBuf = {
-    let env_path = env!("BUILD_PACKAGE_DIR");
-    path::executable_relative_path(env_path)
-};
+lazy_static! {
+	pub static ref DEFAULT_PACKAGE_PATH: PathBuf = path::executable_relative_path(env!("BUILD_PACKAGE_DIR"));
+}
 
 pub fn package_root_path() -> PathBuf {
     match options::RUN.package_path {
@@ -143,28 +142,25 @@ pub fn load_package_dir(starter: ExecuteStarter, project_source: LoaderSource, p
 
 pub fn load_package(starter: ExecuteStarter, project_source: LoaderSource, directory: LoaderSource, path: PathBuf) -> Value {
     /* This is gonna do bad things on case-insensitive filesystems */
-    match PACKAGES_LOADED.get(path) {
-        Some (v) => v,
-        None => {
-            /* COMMENT ME!!! This is not good enough. */
-            let v = if path == PathBuf::from("") {
-            	Value::Table (value_util::table_blank(TableBlankKind::NoSet))
-            }
-            else if path.is_dir() {
-                load_package_dir(starter, project_source, path)
-            }
-            else {
-                let package_scope = Value::Table (value_util::table_blank(TableBlankKind::NoSet));
-                load_file(box_sub_starter(starter, BoxSpec::Populating (BoxTarget::Package, package_scope)), project_source, directory, path);
-                package_scope
-            };
-            
-            unsafe {
-	            PACKAGES_LOADED.insert(path, v);
-            }
-            v
+    PACKAGES_LOADED.get(path).unwrap_or_else(|| {
+        /* COMMENT ME!!! This is not good enough. */
+        let v = if path == PathBuf::from("") {
+        	Value::Table (value_util::table_blank(TableBlankKind::NoSet))
         }
-    }
+        else if path.is_dir() {
+            load_package_dir(starter, project_source, path)
+        }
+        else {
+            let package_scope = Value::Table (value_util::table_blank(TableBlankKind::NoSet));
+            load_file(box_sub_starter(starter, BoxSpec::Populating (BoxTarget::Package, package_scope)), project_source, directory, path);
+            package_scope
+        };
+        
+        unsafe {
+            PACKAGES_LOADED.insert(path, v);
+        }
+        v
+    })
 }
 
 /* Return the value for the project loader. Needs to know "where" the project is. */
@@ -234,6 +230,6 @@ pub fn complete_starter(with_project_location: LoadLocation) -> ExecuteStarter {
 }
 
 /* External entry point: Given a starter and a buffer, execute it */
-pub fn execute_program_from(location: LoadLocation, buf) -> {
+pub fn execute_program_from(location: LoadLocation, buf: Token) -> Value {
     execute::execute(complete_starter(location), buf)
 }

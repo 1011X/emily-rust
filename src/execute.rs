@@ -243,7 +243,7 @@ pub fn execute_step_with_frames(context: ExecuteContext, stack: ExecuteStack, fr
         /* Either no values or just one values, so let's look at the tokens */
         RegisterState::FirstValue (..) |
         RegisterState::LineStart (..) =>
-            evaluate_token(context, stack, frame, more_frames)
+            evaluate_token(context, stack, frame, more_frames),
             /* Pop current frame from the stack, integrate the result into the last frame and recurse (TODO) */
     }
 }
@@ -354,13 +354,13 @@ pub fn evaluate_token_from_tokens(context: ExecuteContext, stack: ExecuteStack, 
         };
         
         simple_value(Value::Closure (ClosureValue {
-        	exec: ClosureExec::User {
+        	exec: ClosureExec::User (ClosureExecUser {
         		body: v.items.clone(),
         		env_scope: frame.scope.clone(),
         		key: key,
         		scoped: v.kind == TokenGroupKind::Scoped,
         		has_return: ret
-        	},
+        	}),
         	bound: vec![],
         	this: ClosureThis::Blank,
         	need_args: key.len()
@@ -445,23 +445,27 @@ pub fn apply(context: ExecuteContext, stack: ExecuteStack, this: Value, a: Value
     let (bv, bat) = b;
     let r = |v| return_to(context, stack, (v, bat));
     /* Pull something out of a table, possibly recursing */
-    let read_table = |t| match (a, value::table_get(t, bv)) {
-        (_, Some (Value::UserMethod (f))) =>
+    let read_table = |t| match (a, t.get(bv)) {
+        (_, Some (&Value::UserMethod (f))) =>
         	apply(context, stack, f, f, (this, bat)), /* FIXME: Comment this */
-        (_, Some (Value::BuiltinMethod (f))) => r(Value::BuiltinFunction (f(this))),
-        (_, Some (Value::BuiltinUnaryMethod (f))) => r(
+    	
+        (_, Some (&Value::BuiltinMethod (f))) =>
+        	r(Value::BuiltinFunction (f(this))),
+    	
+        (_, Some (&Value::BuiltinUnaryMethod (f))) => r(
             (try f(this) with
                 Failure (e) => failWithStack stack @@ format!("Runtime error, applying {} to {}: {}", a, bv, e)
         )),
-        (Value::Object (_), Some (c @ Value::Closure (_))) => r(value_util::raw_rethis_super_from(this, c)),
-        (_, Some (v)) => r(v),
-        (_, None) => match (a, value::table_get(t, value::PARENT_KEY)) {
-            (Value::Object (_), Some (parent @ Value::Closure (_))) =>
+        (Value::Object (_), Some (&c @ Value::Closure (_))) => r(value_util::raw_rethis_super_from(this, c)),
+        (_, Some (&v)) => r(v),
+        (_, None) => match (a, t.get(*value::PARENT_KEY)) {
+            (Value::Object (_), Some (&parent @ Value::Closure (_))) =>
                 apply(context, stack, this, value_util::raw_rethis_super_from(this, parent), b),
-            (_, Some (parent)) => apply(context, stack, this, parent, b),
+            (_, Some (&parent)) => apply(context, stack, this, parent, b),
             (_, None) => value_util::raw_misapply_stack(stack, this, bv),
         },
     };
+    
     /* Unpack prototypes from context */
     let ExecuteContext {
     	null_proto,
@@ -471,6 +475,7 @@ pub fn apply(context: ExecuteContext, stack: ExecuteStack, this: Value, a: Value
     	atom_proto,
     	object_proto
     } = context;
+    
     /* Perform the application */
     match a {
         /* If applying a closure. */
@@ -495,21 +500,19 @@ pub fn apply(context: ExecuteContext, stack: ExecuteStack, this: Value, a: Value
                         }
 
                         if let Value::Table(mut ref t) = scope {
-                            fn add_bound(keys: Vec<String>, values: Vec<Value>) {
-                                match (&*keys, &*values) {
-                                    ([], []) => {}
-                                    ([rest_key.., key], [rest_value.., value]) => {
-                                        t.insert(Value::Atom (key), value);
-                                        add_bound(rest_key, rest_value);
-                                    }
+                            let add_bound = |keys, values| loop {
+                                match (keys, values) {
+                                    ([], []) => break,
+                                    ([rest_key.., key], [rest_value.., value]) =>
+                                        t.insert(Value::Atom (key), value),
                                     _ => unreachable!(),
                             	}
-                            }
+                            };
                             
                             let set_this = |current, this| {
-                                t.insert(value::CURRENT_KEY.clone(), current);
-                                t.insert(value::THIS_KEY.clone(), this);
-                                t.insert(value::SUPER_KEY.clone(), value_util::make_super(current, this));
+                                t.insert(value::CURRENT_KEY, current);
+                                t.insert(value::THIS_KEY, this);
+                                t.insert(value::SUPER_KEY, value_util::make_super(current, this));
                             };
                             
                             match c.this {
@@ -518,8 +521,8 @@ pub fn apply(context: ExecuteContext, stack: ExecuteStack, this: Value, a: Value
                                 _ => {}
                             }
                             
-                            if let ClosureExec::User {has_return: true, ..} = c.exec {
-                            	t.insert(value::RETURN_KEY.clone(), Value::Continuation (stack, bat));
+                            if let ClosureExec::User (ClosureExecUser {has_return: true, ..}) = c.exec {
+                            	t.insert(*value::RETURN_KEY, Value::Continuation (stack, bat));
                             }
                             
                             add_bound(key, bound);

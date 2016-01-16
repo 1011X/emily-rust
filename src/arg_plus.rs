@@ -64,29 +64,23 @@ F: Fn(String) -> Result<(), Error>,
 G: Fn(Vec<String>) {
 	/* Store all rules keyed on parameter */
 	let lookup: HashMap<Arg::Key, Arg::Spec> = HashMap::with_capacity(rules.len());
+	
 	for (key, spec, _) in rules {
 		lookup.insert(key, spec);
 	}
 
 	/* Function to imperatively stream in each argument, one at a time */
-	let mut rest: Vec<String> = env::args().collect();
-	let consume = || match &*rest {
-		[] => None,
-		[next, more..] => {
-			rest = more.to_vec();
-			Some (next)
-		}
-	};
+	let mut rest = env::args();
 
 	/* Inner loop */
 	fn proceed() -> Result<(), > {
-		if let Some (key) = consume() { /* Argument found */
+		if let Some (key) = rest.next() { /* Argument found */
 			match lookup.get(key) {
 				/* This is a known argument and it has no arguments */
 				Some (Spec::Unit (f)) => Ok(f()),
 
 				/* This is a known argument and it has one argument, a string */
-				Some (Spec::String (f)) => match consume() {
+				Some (Spec::String (f)) => match rest.next() {
 					None => Err (Error::Bad (format!("option '{}' needs an argument.", key))),
 					Some (arg) => Ok (f(arg)),
 				},
@@ -97,16 +91,15 @@ G: Fn(Vec<String>) {
 				/* Not a known argument key */
 				None => {
 					/* Interpret key string to see just what this is */
-					let key_len = key.len();
 
 					/* It starts with a - */
-					if key_len > 0 && key.starts_with('-') {
-						match key.find("=") {
+					if key.len() > 0 && key.starts_with('-') {
+						match key.find('=') {
 							/* It's a --a=b, which is why we didn't find the key in the lookup table... */
 							Some (split_at) => {
 								/* Split out the key and value implied by the = and take a pass at lookup */
-								let sub_key = key[0..split_at].to_string();
-								let sub_value = key[split_at + 1..key_len - split_at - 1].to_string();
+								let sub_key = key[..split_at];
+								let sub_value = key[split_at + 1..].to_string();
 								
 								match lookup.get(sub_key) {
 									/* The argument is recognized, but can't be used with = */
@@ -138,10 +131,11 @@ G: Fn(Vec<String>) {
 	}
 
 	/* Error/exceptional situation handling */
-	let name = match consume() {
+	let name = match rest.next() {
 		Some (s) => s, /* argv[0] is executable name */
 		None => "(INTERNAL ERROR)".to_string() /* None implies argc==0, so we won't ever be displaying this anyway? */
 	};
+	
 	match {
 		match proceed() {
 			/* An arg rule requested the help be shown using the Arg interface. */

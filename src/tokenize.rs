@@ -24,14 +24,14 @@ use token::{
 /* Tokenize uses sedlex which is inherently stateful, so tokenize for a single source string is stateful.
    This is the basic state for a file parse-- it basically just records the position of the last seen newline. */
 
-struct TokenizeState {
+pub struct TokenizeState {
 	line_start: isize,
 	line: isize
 }
 
-enum GroupCloseToken { Eof, Char (char) }
+pub enum GroupCloseToken { Eof, Char (char) }
 
-type GroupCloseRecord = (GroupCloseToken, CodePosition);
+pub type GroupCloseRecord = (GroupCloseToken, CodePosition);
 
 pub fn group_close_human_readable(kind: &GroupCloseToken) -> String {
 	match *kind {
@@ -83,6 +83,7 @@ pub fn tokenize(enclosingKind: TokenGroupKind, name: CodeSource, buf) -> Result<
 			},
 		]),
 	]);
+	
 	let number_pattern = Expr::Alternate (vec![
 		hex_number.clone(),
 		octal_number.clone(),
@@ -110,7 +111,10 @@ pub fn tokenize(enclosingKind: TokenGroupKind, name: CodeSource, buf) -> Result<
 
     /* -- State management machinery -- */
     /* Current tokenizer state */
-    let mut state = TokenizeState {line_start: 0, line: 1};
+    let mut state = TokenizeState {
+    	line_start: 0,
+    	line: 1
+	};
     /* Call when the current selected sedlex match is a newline. Mutates tokenizer state. */
     let state_newline = || {
         state.line_start = Sedlexing.lexeme_end(buf);
@@ -134,25 +138,23 @@ pub fn tokenize(enclosingKind: TokenGroupKind, name: CodeSource, buf) -> Result<
         /* This parser works by statefully adding chars to a string buffer */
         let mut accum = String::new();
         
-        /* Helper function adds a literal string to the buffer */
-        let add = |s| accum.push_str(s);
-        
         /* Helper function adds a sedlex match to the buffer */
-        let add_buf = || add(Sedlexing.Utf8.lexeme(buf));
+        let add_buf = || accum.push_str(Sedlexing.Utf8.lexeme(buf));
         
         /* Operate */
-        fn proceed() -> Result<> {
+        let proceed = || {
             /* Call after seeing a backslash. Matches one character, returns string escape corresponds to. */
-            let escaped_char = || match buf {
-                '\\' => Ok("\\"),
-                '"'  => Ok("\""),
-                'n'  => Ok("\n"),
-                _    => Err(parse_fail("Unrecognized escape sequence").unwrap_err()) /* TODO: devour newlines */
+            let escaped_char = |c| match c {
+                '\\' => Ok ("\\"),
+                '"'  => Ok ("\""),
+                'n'  => Ok ("\n"),
+                _    => Err (parse_fail("Unrecognized escape sequence").unwrap_err()), /* TODO: devour newlines */
             };
             
             /* Chew through until quoted string ends */
-            for oc in buf.chars() {
-		        match oc {
+            let chars = buf.chars();
+            loop {
+		        match chars.next() {
 		            /* Treat a newline like any other char, but since sedlex doesn't track lines, we have to record it */
 		            Some ('\n') => {
 		                state_newline();
@@ -160,7 +162,15 @@ pub fn tokenize(enclosingKind: TokenGroupKind, name: CodeSource, buf) -> Result<
 		            }
 		            
 		            /* Backslash found, trigger escape handler */
-		            Some ('\\') => add(escaped_char()),
+		            Some ('\\') => {
+		            	// FIXME: handle unwrap() below.
+		            	let result = escaped_char(chars.next().unwrap());
+		            	
+		            	match result {
+		            		Ok (s) => accum.push_str(s),
+		            		Err (e) => return Err (e),
+	            		}
+	            	}
 		            
 		            /* Unescaped quote found, we are done. Return the data from the buffer. */
 		            Some ('"') => break,
@@ -170,12 +180,13 @@ pub fn tokenize(enclosingKind: TokenGroupKind, name: CodeSource, buf) -> Result<
 		            	Err (incomplete_fail("Reached end of file inside string. Missing quote?").unwrap_err()),
 		            
 		            /* Any normal character add to the buffer and proceed. */
-		            Some (_) => add(Sedlexing.Utf8.lexeme(buf)),
+		            Some (_) => add_buf(),
 		        }
 	        }
 	        
 	        Ok (accum)
         };
+        
         proceed()
     };
 
