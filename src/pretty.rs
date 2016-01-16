@@ -2,16 +2,19 @@
 
 use std::cmp::Ordering;
 
-use options;
 use token::{
 	TableValue,
 	TokenContents,
-	TokenGroupKind
+	TokenGroupKind,
 };
+
 use value::{
 	Value,
-	ClosureExec
+	ClosureExec,
+	RegisterState,
 };
+
+
 
 /* --- Code printers --- */
 
@@ -79,6 +82,18 @@ pub fn dump_code_tree_dense(token: &Token) -> String {
     }
     
     dump_code_tree_general(group_printer, token)
+}
+
+/* Pretty print for RegisterState. */
+pub fn dump_register_state(register_state: &RegisterState) -> String {
+    match *register_state {
+		RegisterState::LineStart (ref v, _) =>
+			format!("LineStart:{}", v),
+		RegisterState::FirstValue (ref v, ..) =>
+			format!("FirstValue:{}", v),
+		RegisterState::PairValue (ref v1, ref v2, ..) =>
+			format!("PairValue:{},{}", v1, v2),
+	}
 }
 
 /* --- Value printers --- */
@@ -194,7 +209,7 @@ pub fn dump_value_for_user(v: &Value) -> String {
 /* FIXME: Can all these various display functions be condensed at all? */
 /* Also, shouldn't more of this be exposed to code? */
 
-/* Should the REPL should show a key/value pair? if not hide it. */
+/* Should the REPL show a key/value pair? if not hide it. */
 pub fn should_show_item(&&(k, _): &&(&Value, &Value)) -> bool {
     !vec![value::PARENT_KEY, value::HAS_KEY, value::SET_KEY, value::LET_KEY]
     	.contains(k)

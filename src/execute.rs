@@ -12,10 +12,6 @@
 
 #![feature(slice_patterns, advanced_slice_patterns)]
 
-use value;
-use value_util;
-use pretty;
-
 use value::{
 	ExecuteFrame,
 	ExecuteStack,
@@ -27,20 +23,6 @@ use value::{
 use value_util::BoxSpec;
 
 use token::CodeSequence;
-
-/* -- DEBUG / PRETTYPRINT HELPERS -- */
-
-/* Pretty print for RegisterState. Can't go in pretty.rs because module recursion. */
-pub fn dump_register_state(register_state: &RegisterState) -> String {
-    match *register_state {
-		RegisterState::LineStart (ref v, _) =>
-			format!("LineStart:{}", v),
-		RegisterState::FirstValue (ref v, ..) =>
-			format!("FirstValue:{}", v),
-		RegisterState::PairValue (ref v1, ref v2, ..) =>
-			format!("PairValue:{},{}", v1, v2),
-	}
-}
 
 /* -- PRACTICAL HELPERS -- */
 
