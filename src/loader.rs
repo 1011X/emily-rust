@@ -7,27 +7,37 @@ use value::{
 	TableBlankKind,
 };
 
+use value_util::{
+	BoxTarget,
+	BoxSpec,
+};
+
 /* File handling utilities */
 
 /* Convert a filename to an atom key for a loader */
 /* FIXME: Refuse to process "unspeakable" atoms, like "file*name"? */
-pub fn nameAtom(filename) -> Value {
-	Value::Atom (try
-        Filename.chop_extension filename      /* If there is an extension remove it */
-    with
-        Invalid_argument _ -> filename)       /* If there is no extension do nothing */
+pub fn name_atom(filename: String) -> Value {
+    /* If there is an extension remove it */
+    /* If there is no extension do nothing */
+	Value::Atom (PathBuf::from(filename)
+		.file_stem()
+		.unwrap()
+		.to_str()
+		.unwrap()
+		.to_string()
+	)
 }
 
 /* See also path.ml */
-let default_package_path = {
+pub static DEFAULT_PACKAGE_PATH: PathBuf = {
     let env_path = env!("BUILD_PACKAGE_DIR");
     path::executable_relative_path(env_path)
 };
 
-pub fn package_root_path() {
+pub fn package_root_path() -> PathBuf {
     match options::RUN.package_path {
-    	Some(s) => s,
-    	_ => default_package_path,
+    	Some (ref s) => s.clone(),
+    	_ => DEFAULT_PACKAGE_PATH.clone(),
 	}
 }
 
@@ -35,13 +45,13 @@ pub fn package_root_path() {
 pub enum LoaderSource {
     NoSource,                  /* I don't want the loader */
     SelfSource,                /* I want the loader inferred from context */
-    Source(Value),             /* I want it to load from a specific path */
+    Source (Value),            /* I want it to load from a specific path */
 }
 
 /* From what source should the project/directory loaders for this execution come? */
 pub enum LoadLocation {
-    Cwd,           /* From the current working directory */
-    Path(String),  /* From a known location */
+    Cwd,            /* From the current working directory */
+    Path (String),  /* From a known location */
 }
 
 /* Given a loaderSource and a known context path, eliminate the SelfSource case */
@@ -57,7 +67,7 @@ pub fn self_filter(self: Value, source: LoaderSource) -> {
 pub fn known_filter(source: LoaderSource) -> Option<Value> {
 	match source {
 		LoaderSource::NoSource => None,
-		LoaderSource::Source(x) => Some(x),
+		LoaderSource::Source (x) => Some (x),
 		_ => ocaml::failwith("Internal error: Package loader attempted to load a file as if it were a directory".to_string()),
 	}
 }
@@ -67,9 +77,9 @@ pub fn known_filter(source: LoaderSource) -> Option<Value> {
 /* Given a starter, make a new starter with a unique scope that is the child of the old starter's scope.
    Return both the starter and the new scope. */
 /* THIS COMMENT IS WRONG, FIX IT */
-pub fn sub_starter_with(starter: ExecuteStarter, table: TableType) -> ExecuteStarter {
+pub fn sub_starter_with(starter: &ExecuteStarter, table: TableType) -> ExecuteStarter {
     ExecuteStarter {
-    	root_scope: Value::Table(table),
+    	root_scope: Value::Table (table),
     	..starter
 	}
 }
@@ -88,8 +98,8 @@ pub fn starter_for_execute(starter: ExecuteStarter, project: Option<Value>, dire
     let (table, sub_starter) = sub_starter_pair(None, starter);
     value::table_set_option(table, value::PROJECT_KEY, project);
     table.insert(value::DIRECTORY_KEY, match directory {
-		Some(d) => d,
-		None => Value::Table(value_util::table_blank(TableBlankKind::NoSet)),
+		Some (d) => d,
+		None => Value::Table (value_util::table_blank(TableBlankKind::NoSet)),
 	});
     sub_starter
 }
@@ -100,7 +110,7 @@ pub fn execute_package(starter: ExecuteStarter, project: Option<Value>, director
 }
 
 lazy_static! {
-	pub static mut ref PACKAGES_LOADED: HashMap<> = HashMap::new();
+	pub static mut ref PACKAGES_LOADED: HashMap<PathBuf, Value> = HashMap::new();
 }
 
 /* Create a package loader object. Will recursively call itself in a lazy way on field access.
@@ -116,71 +126,73 @@ pub fn load_file(starter: ExecuteStarter, project_source: LoaderSource, director
     execute_package(starter, known_filter(project_source), known_filter(directory), buf)
 }
 
-pub fn load_package_dir(starter: ExecuteStarter, project_source: LoaderSource, path) -> Value {
+pub fn load_package_dir(starter: ExecuteStarter, project_source: LoaderSource, path: PathBuf) -> Value {
     let directory_table = value_util::table_blank(TableBlankKind::NoSet);
-    let directory_object = Value::Object(directory_table);
+    let directory_object = Value::Object (directory_table);
     let directory_filter = self_filter(directory_object);
-    let proceed = load_package(starter, directory_filter(project_source), LoaderSource::Source(directory_object));
-    for name in Sys.readdir(path) {
-        value_util::table_set_lazy(directory_table, name_atom(name), |_| proceed(Filename.concat path name));
+    let proceed = load_package(starter, directory_filter(project_source), LoaderSource::Source (directory_object));
+    
+    for name in path.read_dir() {
+    	let mut pathname = path.clone();
+    	pathname.push(name);
+        value_util::table_set_lazy(directory_table, name_atom(name), |_| proceed(pathname));
 	}
+	
     directory_object
 }
 
-pub fn load_package(starter: ExecuteStarter, project_source: LoaderSource, directory: LoaderSource, path) -> {
+pub fn load_package(starter: ExecuteStarter, project_source: LoaderSource, directory: LoaderSource, path: PathBuf) -> Value {
     /* This is gonna do bad things on case-insensitive filesystems */
-    match packages_loaded.get(path) {
-        Some(v) => v,
+    match PACKAGES_LOADED.get(path) {
+        Some (v) => v,
         None => {
-            let v =
-                try
-                    /* COMMENT ME!!! This is not good enough. */
-                    if path.len() == 0 {
-                        raise @@ Sys_error "Empty path"
-                    }
-                    else if Sys.is_directory path {
-                        load_package_dir(starter, project_source, path)
-                    }
-                    else {
-                        let package_scope = Value::Table(value_util::table_blank(TableBlankKind::NoSet));
-                        ignore @@ load_file (box_sub_starter starter @@ Value_util.(Populating(Package,package_scope)))
-                            project_source directory path;
-                        package_scope
-                    }
-                with Sys_error s ->
-                    Value::Table(value_util::table_blank(TableBlankKind::NoSet))
-            packages_loaded.insert(path, v);
+            /* COMMENT ME!!! This is not good enough. */
+            let v = if path == PathBuf::from("") {
+            	Value::Table (value_util::table_blank(TableBlankKind::NoSet))
+            }
+            else if path.is_dir() {
+                load_package_dir(starter, project_source, path)
+            }
+            else {
+                let package_scope = Value::Table (value_util::table_blank(TableBlankKind::NoSet));
+                load_file(box_sub_starter(starter, BoxSpec::Populating (BoxTarget::Package, package_scope)), project_source, directory, path);
+                package_scope
+            };
+            
+            unsafe {
+	            PACKAGES_LOADED.insert(path, v);
+            }
             v
         }
     }
 }
 
 /* Return the value for the project loader. Needs to know "where" the project is. */
-pub fn project_path_for_location(location: LoadLocation) -> {
+pub fn project_path_for_location(location: LoadLocation) -> PathBuf {
     match options::RUN.project_path {
-        Some(s) => s,
+        Some (ref p) => p.clone(),
         None => match location {
-        	Cwd => path::BOOT_PATH,
-        	Path(st) -> st,
+        	Cwd => path::BOOT_PATH.clone(),
+        	Path (p) => p,
     	},
     }
 }
 
-pub fn project_for_location(starter: ExecuteStarter, default_location: LoadLocation) -> {
+pub fn project_for_location(starter: ExecuteStarter, default_location: LoadLocation) -> PathBuf {
     load_package(starter, LoaderSource::SelfSource, LoaderSource::NoSource, project_path_for_location(default_location))
 }
 
 /* For external use: Given a file, get the load_location it would be executed within. */
-pub fn location_around(path) -> {
-    Path (Filename.dirname path)
+pub fn location_around(path: PathBuf) -> LoadLocation {
+    LoadLocation::Path (path.parent().unwrap().to_path_buf())
 }
 
 /* External entry point: Build a starter */
 pub fn complete_starter(with_project_location: LoadLocation) -> ExecuteStarter {
     let root_scope = value_util::table_blank(TableBlankKind::NoSet);
-    let nv = || Value::Table(value_util::table_blank(TableBlankKind::NoSet)); /* "New value" */
+    let nv = || Value::Table (value_util::table_blank(TableBlankKind::NoSet)); /* "New value" */
     let package_starter = ExecuteStarter {
-    	root_scope: Value::Table(root_scope),
+    	root_scope: Value::Table (root_scope),
     	context: ExecuteContext {
 		    null_proto: nv(),
 		    true_proto: nv(),
@@ -195,7 +207,7 @@ pub fn complete_starter(with_project_location: LoadLocation) -> ExecuteStarter {
     let populate_proto = |proto, path_key| {
         /* TODO convert path to either path or value to load from  */
         /* TODO find some way to make this not assume path loaded from disk */
-        let path = vec!["emily", "core", "prototype", PATH_KEY + ".em"].into_iter().fold(package_path, FilePath.concat);
+        let path = vec!["emily", "core", "prototype", path_key + ".em"].into_iter().fold(package_path, FilePath.concat);
         let enclosing = load_package_dir(package_starter, LoaderSource::NoSource, Filename.dirname path);
         load_file(
             box_sub_starter(package_starter, BoxSpec::Populating(BoxTarget::Package, proto)),
@@ -215,7 +227,7 @@ pub fn complete_starter(with_project_location: LoadLocation) -> ExecuteStarter {
     populate_proto(package_starter.context.atom_proto,   "atom");
     populate_proto(package_starter.context.object_proto, "object");
     let project = project_for_location(package_starter, with_project_location);
-    let (scope, starter) = sub_starter_pair(Some(TableBlankKind::WithLet), package_starter);
+    let (scope, starter) = sub_starter_pair(Some (TableBlankKind::WithLet), package_starter);
     scope.insert(value::PROJECT_KEY,   project);
     scope.insert(value::DIRECTORY_KEY, project);
     starter

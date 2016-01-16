@@ -23,28 +23,28 @@ pub enum ExecutionTarget {
 
 pub struct OptionSpec {
 	/* Execution args */
-	target : Option<ExecutionTarget>,
-	args : Vec<String>,
-	repl : bool,
-	step_macro : bool,
-	trace : bool,
-	track_objects : bool,
-	trace_set : bool,
-	package_path : Option<String>,
-	project_path : Option<String>,
-	dont_need_targets : bool, /* Set indirectly by several options */
+	target: Option<ExecutionTarget>,
+	args: Vec<String>,
+	repl: bool,
+	step_macro: bool,
+	trace: bool,
+	track_objects: bool,
+	trace_set: bool,
+	package_path: Option<PathBuf>,
+	project_path: Option<PathBuf>,
+	dont_need_targets: bool, /* Set indirectly by several options */
 
 	/* Things to do instead of execution */
-	disassemble : bool,
-	disassemble_verbose : bool,
-	print_package : bool,
-	print_project : bool,
-	print_version : bool,
-	print_machine_version : bool
+	disassemble: bool,
+	disassemble_verbose: bool,
+	print_package: bool,
+	print_project: bool,
+	print_version: bool,
+	print_machine_version: bool
 }
 
 lazy_static! {
-	pub static ref RUN : OptionSpec = OptionSpec {
+	pub static mut ref RUN: OptionSpec = OptionSpec {
 		target: None,
 		args: vec![],
 		repl: false,
@@ -78,8 +78,8 @@ fn key_mutate_environment() -> {
 	)
 }
 
-fn build_path_set_spec<F: Fn(String)>(name: [&'static str; 2], action: F, whatIs: &'static str) -> ([&'static str; 2], Spec, String) {
-	(name, Spec::String(action), format!("Directory root for packages loaded from \"{}\"", whatIs))
+fn build_path_set_spec<F: Fn(String)>(name: [&'static str; 2], action: F, what_is: &'static str) -> ([&'static str; 2], Spec, String) {
+	(name, Spec::String(action), format!("Directory root for packages loaded from \"{}\"", what_is))
 }
 
 

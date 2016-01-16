@@ -28,12 +28,12 @@ fn main() {
             ExecutionTarget::Stdin =>
             	tokenize::tokenize_channel(CodeSource::Stdin, io::stdin()),
             ExecutionTarget::Literal (s) =>
-            	tokenize::tokenize_string(CodeSource::Cmdline, s.clone())
+            	tokenize::tokenize_string(CodeSource::Cmdline, s.clone()),
         };
         
         let location = match target {
             ExecutionTarget::File (f) => loader::location_around(f),
-            _ => LoadLocation::Cwd
+            _ => LoadLocation::Cwd,
         };
         /*  */
 		if options::RUN.disassemble {
@@ -46,7 +46,7 @@ fn main() {
 			println!("{}", loader::package_root_path());
 		}
 		else if options::RUN.print_project {
-			println!("{}", loader::project_path_for_location(location));
+			println!("{}", loader::project_path_for_location(location).display());
 		}
 		else {
 			loader::execute_program_from(location, buf);
