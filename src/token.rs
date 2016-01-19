@@ -23,7 +23,7 @@ impl fmt::Display for CodeSource {
 			Cmdline => f.write_str("<commandline>"),
 			Unknown => f.write_str("<unknown>"),
 			
-			Internal (ref s) => f.write_fmt(format_args!("<internal:{}>", s)),
+			Internal (s) => f.write_fmt(format_args!("<internal:{}>", s)),
 			File (ref s) => f.write_fmt(format_args!("'{}'", s)),
 		}
 	}
@@ -102,23 +102,23 @@ pub enum TokenContents<'a> {
 
 /* A token. Effectively, an AST node. */
 #[derive(Clone)]
-pub struct Token {
+pub struct Token<'a> {
 	at: CodePosition,
-	contents: TokenContents,
+	contents: TokenContents<'a>,
 }
 
 /* Quick constructor for token */
 pub fn make_token(position: &CodePosition, contents: &TokenContents) -> Token {
 	Token {
 		at: position.clone(),
-		contents: contents.clone()
+		contents: contents.clone(),
 	}
 }
 
 /* Quick constructor for token, group type */
-pub fn make_group(position: &CodePosition, closure: &TokenClosureKind, kind: &TokenGroupKind, group_initializer: &Vec<Token>, items: &CodeSequence) -> Token {
+pub fn make_group(position: &CodePosition, closure: &TokenClosureKind, kind: TokenGroupKind, group_initializer: &Vec<Token>, items: &CodeSequence) -> Token {
     make_token(position, &TokenContents::Group (TokenGroup {
-    	kind: kind.clone(),
+    	kind: kind,
     	closure: closure.clone(),
     	group_initializer: group_initializer.clone(),
     	items: items.clone(),

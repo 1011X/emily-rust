@@ -8,3 +8,4 @@ authors = [
 [dependencies]
 regex = "0.1.41"
 lazy_static = "0.1.*"
+ctrlc = "1.0.1"

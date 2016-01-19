@@ -15,7 +15,6 @@ use value::{
 };
 
 
-
 /* --- Code printers --- */
 
 /* "Disassemble" a token tree into a human-readable string (specializable) */
@@ -23,21 +22,24 @@ pub fn dump_code_tree_general<F>(group_printer: F, token: &Token) -> String wher
 F: Fn(&Token, String, String, CodeSequence) -> String {
     match token.contents {
     /* For a simple (nongrouping) token, return a string for just the item */
-		TokenContents::Word(x) | TokenContents::Symbol(x) => x,
-		TokenContents::String(x) => format!("\"{}\"", x),
-		TokenContents::Atom(x) => format!(".{}", x),
-		TokenContents::Number(x) => x.to_string(),
+		TokenContents::Word (x) |
+		TokenContents::Symbol (x) => x.to_string(),
+		TokenContents::String (x) => format!("\"{}\"", x),
+		TokenContents::Atom (x) => format!(".{}", x),
+		TokenContents::Number (x) => x.to_string(),
 		TokenContents::Group (TokenGroup {kind, closure, items}) => {
 		    let (l, r) = match kind {
-		        TokenGroupKind::Plain => ("(".to_string(), ")"),
-		        TokenGroupKind::Scoped => ("{".to_string(), "}"),
-		        TokenGroupKind::Box (_) => ("[".to_string(), "]"),
+		        TokenGroupKind::Plain => ("(", ")"),
+		        TokenGroupKind::Scoped => ("{", "}"),
+		        TokenGroupKind::Box (_) => ("[", "]"),
 		    };
+		    
 		    let l = match closure {
 		        TokenGroupKind::NonClosure => "".to_string(),
 		        TokenGroupKind::ClosureWithBinding (_, binding) => 
 		        	format!("^{}", if binding == [] { "" } else { binding.join(" ") }),
-		    } + &l;
+		    } + l;
+		    
 		    /* GroupPrinter is an argument function which takes the left group symbol, right group
 		       symbol, and group contents, and decides how to format them all. */
 		    group_printer(token, l, r.to_string(), items)

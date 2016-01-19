@@ -44,7 +44,7 @@ pub struct OptionSpec {
 }
 
 lazy_static! {
-	pub static mut ref RUN: OptionSpec = OptionSpec {
+	pub static ref mut RUN: OptionSpec = OptionSpec {
 		target: None,
 		args: vec![],
 		repl: false,

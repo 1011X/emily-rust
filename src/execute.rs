@@ -387,11 +387,11 @@ pub fn evaluate_token_from_tokens(context: ExecuteContext, stack: ExecuteStack, 
                     let new_scope = group_scope(context, group.kind, frame.scope, with_initializer_value);
                     let items = match group.kind {
                         TokenGroupKind::Box (_) => {
-                            let wrapper_group = token::clone(token, TokenContents::Group (TokenGroup {
+                            let wrapper_group = token::clone(token, &TokenContents::Group (TokenGroup {
                             	kind: TokenGroupKind::Plain,
                             	closure: TokenGroupKind::NonClosure,
                             	group_initializer: vec![],
-                            	items: group.items
+                            	items: group.items,
                             }));
                             let word = clone(token, TokenContents::Word (value::CURRENT_KEY_STRING));
                             vec![vec![wrapper_group], vec![word]]

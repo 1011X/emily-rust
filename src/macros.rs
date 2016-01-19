@@ -1,5 +1,5 @@
 /* Macro processing */
-#![feature(box_syntax)]
+#![feature(box_syntax, fnbox)]
 
 #[macro_use]
 extern crate lazy_static;
@@ -7,50 +7,49 @@ extern crate lazy_static;
 use std::collections::HashMap;
 use std::sync::{Once, ONCE_INIT};
 
-use token;
-
 use token::{
     TokenContents,
     TokenClosureKind,
     TokenGroupKind
 };
 
-pub fn fail_at(at: &CodePosition, mesg: String) -> Result<(), token::CompilationError> {
-    Err (token::CompilationError (Token.MacroError, at, mesg))
+pub fn fail_at(at: &CodePosition, mesg: &str) -> Result<(), token::CompilationError> {
+    Err (token::CompilationError (Token.MacroError, at.clone(), mesg.to_string()))
 }
-pub fn fail_token(at: &Token, mesg: String) -> Result<(), token::CompilationError> {
+pub fn fail_token(at: &Token, mesg: &str) -> Result<(), token::CompilationError> {
     fail_at(&at.at, mesg)
 }
 
 /* Last thing we always do is make sure no symbols survive after macro processing. */
-pub fn verify_symbols(l: SingleLine) -> SingleLine {
-    for token in l.iter() {
-        if let &Token {contents: TokenContents::Symbol(ref s), ref at} = token {
-            token::fail_at(at, format!("Unrecognized symbol {}", s));
+pub fn verify_symbols(line: &SingleLine) -> Result<SingleLine, token::CompilationError> {
+    for &token in line {
+        if let Token {contents: TokenContents::Symbol (s), ref at} = token {
+            return token::fail_at(at, &format!("Unrecognized symbol {}", s));
         }
     }
-    l
+    Ok (line)
 }
 
 /* Types for macro processing. */
 
-enum MacroPriority { L (f64), R (f64) } /* See builtinMacros comment */
+#[derive(Clone, Copy)]
+pub enum MacroPriority { L (f64), R (f64) } /* See builtinMacros comment */
 
-type SingleLine = Vec<Token>;
+pub type SingleLine = Vec<Token>;
 
 /* Note what a single macro does:
     The macro processor sweeps over a line, keeping a persistent state consisting of
     "past" (tokens behind cursor, reverse order) "present" (token at cursor) and
     "future" (tokens ahead of cursor). A macro replaces all 3 with a new line. */
-type MacroFunction = Box<Fn(SingleLine, Token, SingleLine) -> SingleLine>;
+pub type MacroFunction = Box<FnBox(SingleLine, Token, SingleLine) -> SingleLine>;
 
-struct MacroSpec {
+pub struct MacroSpec {
     priority: MacroPriority,
     spec_function: MacroFunction,
 }
 
-struct MacroMatch {
-    matchFunction: MacroFunction,
+pub struct MacroMatch {
+    match_function: MacroFunction,
     past: SingleLine,
     present: token::Token,
     future: SingleLine
@@ -58,25 +57,34 @@ struct MacroMatch {
 
 /* The set of loaded macros lives here. */
 lazy_static! {
-	pub static ref mut MACRO_TABLE: HashMap<String, MacroSpec> = HashMap::with_capacity(1);
+	pub static ref MACRO_TABLE: HashMap<String, MacroSpec> = {
+		/* Populate macro table from BUILTIN_MACROS. */
+		let mut hm = HashMap::with_capacity(BUILTIN_MACROS.len());
+		
+		for &(priority, key, spec_function) in &BUILTIN_MACROS {
+			hm.insert(key, MacroSpec {priority, spec_function});
+		}
+		
+		hm
+	};
 }
 
 /* All manufactured tokens should be made through clone, so that position information is retained */
-pub fn clone_atom(at: &CodePosition, s: String) -> Token {
-    token::clone(at, TokenContents::Atom (s))
+pub fn clone_atom(at: &CodePosition, s: &str) -> Token {
+    token::clone(at, &TokenContents::Atom (s))
 }
 
-pub fn clone_word(at: &CodePosition, s: String) -> Token {
-    token::clone(at, TokenContents::Word (s))
+pub fn clone_word(at: &CodePosition, s: &str) -> Token {
+    token::clone(at, &TokenContents::Word (s))
 }
 
 pub fn clone_group(at: &CodePosition) -> Token {
-    token::clone_group(at, TokenClosureKind::NonClosure, TokenGroupKind::Plain, vec![])
+    token::clone_group(at, &TokenClosureKind::NonClosure, TokenGroupKind::Plain, &vec![])
 }
 
 /* Note: makes no-return closures */
 pub fn clone_closure(at: &CodePosition) -> Token {
-    token::clone_group(at, TokenClosureKind::ClosureWithBinding (false, vec![]), TokenGroupKind::Plain, vec![])
+    token::clone_group(at, &TokenClosureKind::ClosureWithBinding (false, vec![]), TokenGroupKind::Plain, &vec![])
 }
 
 /* Debug method gets to use this. */
@@ -87,14 +95,14 @@ lazy_static! {
 		    line_number: 0,
 		    line_offset: 0
 		},
-		TokenContents::Symbol ("_".to_string())
+		TokenContents::Symbol ("_"),
 	);
 }
 
 /* Macro processing, based on whatever builtinMacros contains */
 pub fn process(l: SingleLine) -> SingleLine {
     if options::RUN.step_macro {
-    	println!(pretty::dump_code_tree_terse(clone_group(NULL_TOKEN, vec![l])));
+    	println!("{}", pretty::dump_code_tree_terse(clone_group(NULL_TOKEN, vec![l])));
     }
 
     /* Search for macro to process next. Priority None/line None means none known yet. */
@@ -114,45 +122,44 @@ pub fn process(l: SingleLine) -> SingleLine {
         /* Investigate token under cursor */
         match present.contents {
             /* Words or symbols can currently be triggers for macros. */
-            TokenContents::Word (s) | TokenContents::Symbol (s) =>
-                /* Is the current word/symbol a thing in the macro table? */
-                let v = MACRO_TABLE.get(s).cloned();
-                match v {
-                    /* It's in the table; now to decide if it's an ideal match. */
-                    Some (MacroSpec {priority, spec_function}) => {
-                        /* True if this macro is better fit than the current candidate. */
-                        let better = match (best_priority, priority) {
-                            /* No matches yet, automatic win. */
-                            (None, _) => true,
+            TokenContents::Word (s) |
+            TokenContents::Symbol (s) => match MACRO_TABLE.get(s) { /* Is the current word/symbol a thing in the macro table? */
+                /* It's in the table; now to decide if it's an ideal match. */
+                Some (&MacroSpec {priority, spec_function}) => {
+                    /* True if this macro is better fit than the current candidate. */
+                    let better = match (best_priority, priority) {
+                        /* No matches yet, automatic win. */
+                        (None, _) => true,
 
-                            /* If associativity varies, we can determine winner based on that alone: */
-                            /* Prefer higher priority, but break ties toward left-first macros over right-first ones. */
-                            (Some L(left), R(right)) => left < right,
-                            (Some R(left), L(right)) => left <= right,
+                        /* If associativity varies, we can determine winner based on that alone: */
+                        /* Prefer higher priority, but break ties toward left-first macros over right-first ones. */
+                        (Some (L (left)), R (right)) => left < right,
+                        (Some (R (left)), L (right)) => left <= right,
 
-                            /* "Process leftmost first": Prefer higher priority, break ties to the left. */
-                            (Some L(left), L(right)) => left < right,
+                        /* "Process leftmost first": Prefer higher priority, break ties to the left. */
+                        (Some (L (left)), L (right)) => left < right,
 
-                            /* "Process rightmost first": Prefer higher priority, break ties to the right. */
-                            (Some R(left), R(right)) => left <= right,
-                        };
-                        
-                        if better {
-                            proceed(Some (priority), Some (MacroMatch {
-                            	past: past,
-                            	present: present,
-                            	future: future,
-                            	match_function: spec_function
-                            }));
-                        }
-                        /* It's a worse match than the current best guess. */
-                        else {
-                        	skip();
-                    	}
+                        /* "Process rightmost first": Prefer higher priority, break ties to the right. */
+                        (Some (R (left)), R (right)) => left <= right,
+                    };
+                    
+                    if better {
+                        proceed(Some (priority), Some (MacroMatch {
+                        	past: past,
+                        	present: present,
+                        	future: future,
+                        	match_function: spec_function,
+                        }));
                     }
-                    /* It's not in the table. */
-                    _ => skip(),
+                    /* It's a worse match than the current best guess. */
+                    else {
+                    	skip();
+                	}
                 }
+                /* It's not in the table. */
+                _ => skip(),
+            },
+            
             /* It's not even a candidate to trigger a macro. */
             _ => skip(),
         }
@@ -304,10 +311,10 @@ pub fn question(past: SingleLine, at: &CodePosition, future: SingleLine) -> Sing
     ];
     fn scan(a, rest) -> SingleLine {
         match &*rest {
-            [more_rest.., colon_at @ Token {contents: TokenContents::Symbol (sym)}] if sym == ":" =>
+            [more_rest.., colon_at @ Token {contents: TokenContents::Symbol (":")}] =>
                 result(colon_at, past.into_iter().rev().collect(), a.into_iter().rev().collect(), more_rest.to_vec()),
                 
-            [more_rest.., Token {contents: TokenContents::Symbol (sym)}] if sym == "?" =>
+            [more_rest.., Token {contents: TokenContents::Symbol ("?")}] =>
                 token::fail_token(at, "Nesting like ? ? : : is not allowed.".to_string())
             
             [more_rest.., token] =>
@@ -345,7 +352,7 @@ pub fn assignment(past: SingleLine, at: &CodePosition, future: SingleLine) -> Si
                 ([], _) => token::fail_token(at, "Found a =, but nothing to assign to.".to_string()),
 
                 /* Sorta awkward, detect the "nonlocal" prefix and swap out let. This should be generalized. */
-                ([more_lookups.., cmd_token @ Token {contents: TokenContents::Word (word), ..}], "let") if word == "nonlocal" =>
+                ([more_lookups.., cmd_token @ Token {contents: TokenContents::Word ("nonlocal"), ..}], "let") =>
                 	result_for_command(cmd_token, value::SET_KEY_STRING, more_lookups),
 
                 /* Looks like a = b */
@@ -382,17 +389,16 @@ pub fn assignment(past: SingleLine, at: &CodePosition, future: SingleLine) -> Si
     fn process_left(remaining_left: SingleLine, lookups: SingleLine, bindings: Option<Vec<String>>) -> SingleLine {
         match (remaining_left, bindings) {
             /* If we see a ^, switch to loading bindings */
-            ([Token {contents: TokenContents::Symbol (sym), ..}, more_left..], None)
-            if sym == "^" =>
+            ([Token {contents: TokenContents::Symbol ("^"), ..}, more_left..], None) =>
                 process_left(more_left, lookups, Some (vec![])),
 
             /* If we're already loading bindings, just skip it */
-            ([Token {contents: TokenContents::Symbol (sym), ..}, more_left..], _)
-            if sym == "^" =>
+            ([Token {contents: TokenContents::Symbol ("^"), ..}, more_left..], _) =>
                 process_left(more_left, lookups, bindings),
 
             /* Sanitize any symbols that aren't cleared for the left side of an = */
-            ([Token {contents: TokenContents::Symbol (x), ..}, ..], _) => failwith(format!("Unexpected symbol {} to left of =", x)),
+            ([Token {contents: TokenContents::Symbol (x), ..}, ..], _) =>
+            	failwith(format!("Unexpected symbol {} to left of = ", x)),
 
             /* We're adding bindings */
             ([Token {contents: TokenContents::Word (b), ..}, rest_past..], Some (bindings)) =>
@@ -420,8 +426,7 @@ pub fn closure_construct(with_return: bool) -> MacroFunction {
         fn open_closure(bindings: Vec<String>, future: SingleLine) -> SingleLine {
             match &*future {
                 /* If redundant ^s seen, skip them. */
-                [Token {contents: TokenContents::Symbol (sym), ..}, more_future..]
-                if sym == "^" =>
+                [Token {contents: TokenContents::Symbol ("^"), ..}, more_future..] =>
                     open_closure(bindings, more_future.to_vec()),
 
                 /* This is a binding, add to list. */
@@ -459,8 +464,7 @@ pub fn comma(past: SingleLine, at: CodePosition, future: SingleLine) -> SingleLi
             [] => push_line(),
             
             /* Another comma was found, open a new section */
-            [Token {contents: TokenContents::Symbol (sym), ..}, more_future..]
-            if sym == "," =>
+            [Token {contents: TokenContents::Symbol (","), ..}, more_future..] =>
             	gather(vec![], push_line(), more_future.to_vec()),
         	
             /* Add token to current section */
@@ -502,12 +506,15 @@ pub fn atom(past: SingleLine, at: CodePosition, future: SingleLine) -> SingleLin
 }
 
 /* Splitter which performs an unrelated unary operation if nothing to the left. */
-pub fn make_dual_mode_splitter(unary_atom, binary_atom) -> MacroFunction {
+pub fn make_dual_mode_splitter(unary_atom: String, binary_atom: String) -> MacroFunction {
 	box move |past, at, future| {
 		let prefix_unary = make_unary(unary_atom);
 		let splitter = make_splitter(binary_atom);
-		match past {
-		    [] | [Token {contents: TokenContents::Symbol (s), ..}, ..]
+		
+		match &*past {
+		    [] => prefix_unary(past, at, future),
+		    
+		    [Token {contents: TokenContents::Symbol (s), ..}, ..]
 		    /* Because this is intended for unary -, special-case arithmetic. */
 		    /* I don't much like this solution? */
 		    if s == "*" || s == "/" || s == "%" || s == "-" || s == "+" =>
@@ -542,7 +549,8 @@ pub fn make_dual_mode_splitter(unary_atom, binary_atom) -> MacroFunction {
 */
 
 lazy_static! {
-	pub static ref BUILTIN_MACROS = vec![
+	pub static ref BUILTIN_MACROS: Vec<(MacroPriority, &'static str, MacroFunction)>
+	= vec![
 		/* Weird grouping */
 
 		(R(20.), "`", backtick),
@@ -586,11 +594,3 @@ lazy_static! {
 		(L(150.), ",", comma),
 	];
 }
-
-/* Populate macro table from BUILTIN_MACROS. */
-static START: Once = ONCE_INIT;
-START.call_once(|| {
-    for (priority, key, spec_function) in BUILTIN_MACROS {
-    	MACRO_TABLE.insert(key, MacroSpec {priority, spec_function});
-    }
-});

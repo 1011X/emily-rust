@@ -29,6 +29,7 @@ pub struct TokenizeState {
 	line: isize
 }
 
+#[derive(Clone, Copy)]
 pub enum GroupCloseToken { Eof, Char (char) }
 
 pub type GroupCloseRecord = (GroupCloseToken, CodePosition);
@@ -317,7 +318,10 @@ pub fn tokenize(enclosingKind: TokenGroupKind, name: CodeSource, buf) -> Result<
             }
 
             /* Quoted string */
-            '"' => add_to_line_proceed(make_token_here(TokenContents::String (quoted_string()))),
+            '"' => add_to_line_proceed(make_token_here(TokenContents::String (match quoted_string() {
+        		Ok (a) => a,
+        		Err (e) => return Err (e)
+    		}))),
 
             /* Floating point number */
             // FIXME: try parse
@@ -334,9 +338,9 @@ pub fn tokenize(enclosingKind: TokenGroupKind, name: CodeSource, buf) -> Result<
 
             /* Reader instructions.
                TODO: A more general system for reader instructions; allow tab after \version */
-            "\\version 0.1" => { escape(true); skip() } /* Ignore to end of line, don't consume */
+            "\\version 0.1" |
             "\\version 0.2" => { escape(true); skip() } /* Ignore to end of line, don't consume */
-            '\\' => { escape(false); skip() }             /* Ignore to end of line and consume it */
+            '\\' => { escape(false); skip() }           /* Ignore to end of line and consume it */
 
             /* Ignore whitespace */
             white_space => skip(),
@@ -376,8 +380,7 @@ pub fn unwrap(token: Token) -> Result<CodeSequence, String> {
 
 pub fn snippet(source: CodeSource, st: String) -> Result<CodeSequence, String> {
     match tokenize_string(source, st) {
-        Ok (v) => unwrap(v),
-        
+        Ok (v) => unwrap(v),       
         Err (e) => Err(format!("Internal error: Interpreter-internal code is invalid: {}", e)),
     }
 }
