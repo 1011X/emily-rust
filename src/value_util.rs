@@ -384,19 +384,23 @@ pub fn table_blank(kind: TableBlankKind) -> TableType {
 	t
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum BoxTarget { Package, Object }
+
 pub enum BoxSpec { Populating(BoxTarget, Value) }
 
 pub fn box_blank(box_kind: BoxSpec, box_parent: Value) -> TableType {
 	let BoxSpec::Populating (target_type, target_value) = box_kind;
     let mut t = table_blank(TableBlankKind::NoLet);
     let mut private_table = table_blank(TableBlankKind::NoLet);
-    let private_value = Value::Table(private_table);
+    let private_value = Value::Table (private_table);
     let target_table = table_from(target_value);
+    
     private_table.insert(value::LET_KEY.clone(), make_let( /* Another fallacious value usage */
     	// TODO: currying
         act_pair_table_set(private_value, private_table, Value::Table (t), t)
     ));
+    
     t.insert(Value::LET_KEY.clone(), make_let( /* See objects.md */
         if targetType == Package {
         	// TODO: currying
@@ -406,9 +410,11 @@ pub fn box_blank(box_kind: BoxSpec, box_parent: Value) -> TableType {
             act_table_set_with(raw_rethis_assign_object_definition, target_value, target_table)
         }
     ));
+    
     if target_type == Package {
         t.insert(value::EXPORT_LET_KEY.clone(), make_let(act_table_set(target_value, target_table)))
     }
+    
     t.insert(value::THIS_KEY.clone(), target_value);
     t.insert(value::PARENT_KEY.clone(), box_parent);
     t.insert(value::CURRENT_KEY.clone(), target_value);

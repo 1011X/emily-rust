@@ -42,10 +42,12 @@ pub fn object_literal_scope(obj: BoxSpec, scope_parent: Value) -> Value {
 pub fn group_scope(context: ExecuteContext, token_kind: TokenGroupKind, scope: Value, initializer_value: Option<Value>) -> Value {
     match token_kind {
         TokenGroupKind::Plain => initializer_value.unwrap_or(scope),
+        
         TokenGroupKind::Scoped => scope_inheriting(
         	TableBlankKind::WithLet,
             initializer_value.unwrap_or(scope)
         ),
+        
         TokenGroupKind::Box (kind) => object_literal_scope(
             value_util::PopulatingObject (initializer_value.unwrap_or(
             	value_util::object_blank(Some (context.object_proto))
@@ -64,6 +66,7 @@ pub fn new_state_for(register: RegisterState, av: AnchoredValue) -> RegisterStat
 		(RegisterState::LineStart (_, rat), (v, at)) |
 		(RegisterState::PairValue (_, _, rat, _), (v, at)) =>
 			RegisterState::FirstValue (v, rat, at),
+		
 		/* Or combine with an existing value to make a pair. */
 		(RegisterState::FirstValue (v, rat, _), (v2, at)) =>
 			RegisterState::PairValue (v, v2, rat, at)
@@ -79,18 +82,10 @@ pub fn stack_frame(scope: Value, code: CodeSequence, at: CodePosition) -> Execut
 	ExecuteFrame {
 		register: start_register(at),
 		code: code,
-		scope: scope
+		scope: scope,
 	}
 }
 
-/* Only call if it really is impossible, since this gives no debug feedback */
-/* Mostly I call this if a nested match has to implement a case already excluded */
-// XXX Replaced by unreachable!()
-/*
-pub fn internal_fail() -> ! {
-	panic!("Internal consistency error: Reached impossible place");
-}
-*/
 pub fn fail_with_stack(stack: ExecuteStack, mesg: &str) -> Result <(), String> {
     Err (format!("{}\n{}", mesg, value_util::stack_string(stack)))
 }
@@ -220,7 +215,7 @@ pub fn execute_step_with_frames(context: ExecuteContext, stack: ExecuteStack, fr
 			dump_register_state(frame.register),
 			pretty::dump_code_tree_terse(
 				token::make_group(
-					Token {
+					CodePosition {
 						file_name: CodeSource::Unknown,
 						line_number: 0,
 						line_offset: 0

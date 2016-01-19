@@ -73,62 +73,60 @@ G: Fn(Vec<String>) {
 	let mut rest = env::args();
 
 	/* Inner loop */
-	fn proceed() -> Result<(), > {
-		if let Some (key) = rest.next() { /* Argument found */
-			match lookup.get(key) {
-				/* This is a known argument and it has no arguments */
-				Some (Spec::Unit (f)) => Ok(f()),
+	// () -> Result<(), >
+	let proceed = || while let Some (key) = rest.next() { /* Argument found */
+		match lookup.get(&key) {
+			/* This is a known argument and it has no arguments */
+			Some (Spec::Unit (f)) => return Ok(f()),
 
-				/* This is a known argument and it has one argument, a string */
-				Some (Spec::String (f)) => match rest.next() {
-					None => Err (Error::Bad (format!("option '{}' needs an argument.", key))),
-					Some (arg) => Ok (f(arg)),
-				},
+			/* This is a known argument and it has one argument, a string */
+			Some (Spec::String (f)) => return match rest.next() {
+				None => Err (Error::Bad (format!("option '{}' needs an argument.", key))),
+				Some (arg) => Ok (f(arg)),
+			},
 
-				/* Incorrect use of ArgPlus */
-				Some (_) => arg_plus_limitations("arg_parse"),
+			/* Incorrect use of ArgPlus */
+			// FIXME: Handle Result value here
+			Some (_) => return arg_plus_limitations("arg_parse"),
 
-				/* Not a known argument key */
-				None => {
-					/* Interpret key string to see just what this is */
+			/* Not a known argument key */
+			None => {
+				/* Interpret key string to see just what this is */
 
-					/* It starts with a - */
-					if key.len() > 0 && key.starts_with('-') {
-						match key.find('=') {
-							/* It's a --a=b, which is why we didn't find the key in the lookup table... */
-							Some (split_at) => {
-								/* Split out the key and value implied by the = and take a pass at lookup */
-								let sub_key = key[..split_at];
-								let sub_value = key[split_at + 1..].to_string();
-								
-								match lookup.get(sub_key) {
-									/* The argument is recognized, but can't be used with = */
-									Some (Spec::Unit (_)) => Err (Spec::Bad (format!("option '{}' does not take an argument.", sub_key)))
+				/* It starts with a - */
+				if key.len() > 0 && key.starts_with('-') {
+					match key.find('=') {
+						/* It's a --a=b, which is why we didn't find the key in the lookup table... */
+						Some (split_at) => {
+							/* Split out the key and value implied by the = and take a pass at lookup */
+							let sub_key = &key[..split_at];
+							let sub_value = key[split_at + 1..].to_string();
+							
+							match lookup.get(sub_key) {
+								/* The argument is recognized, but can't be used with = */
+								Some (Spec::Unit (_)) => Err (Spec::Bad (format!("option '{}' does not take an argument.", sub_key)))
 
-									/* The argument is recognized and we can work with it */
-									Some (Spec::String (f)) => Ok(f(sub_value)),
+								/* The argument is recognized and we can work with it */
+								Some (Spec::String (f)) => Ok(f(sub_value)),
 
-									/* Incorrect use of ArgPlus */
-									Some (_) => arg_plus_limitations("arg_parse"),
+								/* Incorrect use of ArgPlus */
+								Some (_) => arg_plus_limitations("arg_parse"),
 
-									/* Despite pulling out the =, it's still unrecognized */
-									None => Err (Spec::Bad (format!("unknown option '{}'", sub_key)))
-								}
+								/* Despite pulling out the =, it's still unrecognized */
+								None => Err (Spec::Bad (format!("unknown option '{}'", sub_key)))
 							}
-							/* No gimmicks, it's just plain not recognized */
-							None => Err (Spec::Bad (format!("unknown option '{}'", key)))
 						}
+						/* No gimmicks, it's just plain not recognized */
+						None => Err (Spec::Bad (format!("unknown option '{}'", key)))
 					}
-					/* This doesn't start with a -, so it's an anonymous argument. Let the user handle it */
-					else {
-						fallback(key);
-					}
-					
-					proceed()
+				}
+				/* This doesn't start with a -, so it's an anonymous argument. Let the user handle it */
+				else {
+					fallback(key);
 				}
 			}
 		}
-	}
+	};
 
 	/* Error/exceptional situation handling */
 	let name = match rest.next() {
@@ -139,7 +137,7 @@ G: Fn(Vec<String>) {
 	match {
 		match proceed() {
 			/* An arg rule requested the help be shown using the Arg interface. */
-			Err (Arg.Help (_)) => Err (Help 0), /* FIXME: What is the argument to Arg.Help for? It isn't documented. */
+			Err (Arg.Help (_)) => Err (Error::HelpExit (0)), /* FIXME: What is the argument to Arg.Help for? It isn't documented. */
 
 			/* An arg rule requested a premature halt to processing. */
 			Err (Complete) => Ok(()),

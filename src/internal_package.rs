@@ -95,7 +95,7 @@ START.call_once(|| {
 			Value::Null
 		}
 		[_, _, _] => failwith "Attempted to call setPropertyKey on something other than an object",
-		_ => unreachable!("Internal consistency error: Reached impossible place"),
+		_ => unreachable!(),
 	}));
 
 	set_atom_value(None, "fail", Value::BuiltinHandoff (|_, stack, value| {
@@ -132,13 +132,13 @@ START.call_once(|| {
 	let set_atom_math = |table, name, f| set_atom_value(Some (table.unwrap_or(double_table)), name, value_util::snippet_closure(2, |x| match &*x {
 		[Value::Float (f1), Value::Float (f2)] => Value::Float (f(f1, f2)),
 		[Value::Float (_), _] => failwith "Don't know how to combine that with a number",
-		_ => unreachable!("Internal consistency error: Reached impossible place"),
+		_ => unreachable!(),
 	}));
 
 	let set_atom_test = |table, name, f| set_atom_value(Some (table.unwrap_or(double_table)), name, value_util::snippet_closure(2, |x| match &*x {
 		[Value::Float (f1), Value::Float (f2)] => value_util::bool_cast(f(f1, f2)),
 		[Value::Float (_), _] => failwith "Don't know how to compare that to a number",
-		_ => unreachable!("Internal consistency error: Reached impossible place"),
+		_ => unreachable!(),
 	}));
 
 	let set_atom_math_fn = |table, name, f| set_atom_fn(Some (table.unwrap_or(double_table)), name, |x| match x {
@@ -215,7 +215,7 @@ START.call_once(|| {
 	set_atom_value(Some (string_table), "concat", value_util::snippet_closure(2, |x| match &*x {
 		[Value::String (f1), Value::String (f2)] => Value::String (format!("{}{}", f1, f2)),
 		[Value::String (_), _] => failwith "Don't know how to combine that with a string",
-		_ => unreachable!("Internal consistency error: Reached impossible place"),
+		_ => unreachable!(),
 	}));
 
 	/* "Submodule" internal.type */

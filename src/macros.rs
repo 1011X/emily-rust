@@ -24,7 +24,7 @@ pub fn fail_token(at: &Token, mesg: &str) -> Result<(), token::CompilationError>
 pub fn verify_symbols(line: &SingleLine) -> Result<SingleLine, token::CompilationError> {
     for &token in line {
         if let Token {contents: TokenContents::Symbol (s), ref at} = token {
-            return token::fail_at(at, &format!("Unrecognized symbol {}", s));
+            return Err (token::fail_at(at, &format!("Unrecognized symbol {}", s)).unwrap_err());
         }
     }
     Ok (line)
@@ -303,27 +303,52 @@ pub fn backtick(past: SingleLine, at: &CodePosition, future: SingleLine) -> Sing
 
 /* Works like ocaml @@ or haskell $ */
 pub fn question(past: SingleLine, at: &CodePosition, future: SingleLine) -> SingleLine {
-    let result = |colon_at, cond, a, b| vec![
-    	clone_word(at, "tern".to_string()),
-        new_future(at, cond),
-        new_future_closure(at, a),
-        new_future_closure(colon_at, b)
-    ];
-    fn scan(a, rest) -> SingleLine {
-        match &*rest {
-            [more_rest.., colon_at @ Token {contents: TokenContents::Symbol (":")}] =>
-                result(colon_at, past.into_iter().rev().collect(), a.into_iter().rev().collect(), more_rest.to_vec()),
+    let mut a = vec![];
+    let mut rest = &*future;
+    
+    loop {
+        match rest {
+            [more_rest.., ref colon_at @ Token {contents: TokenContents::Symbol (":"), ..}] => return Ok (vec![
+				clone_word(at, "tern".to_string()),
+				new_future(at, past.into_iter().rev().collect()),
+				new_future_closure(at, a.into_iter().rev().collect()),
+				new_future_closure(colon_at, more_rest.to_vec())
+			]),
                 
-            [more_rest.., Token {contents: TokenContents::Symbol ("?")}] =>
-                token::fail_token(at, "Nesting like ? ? : : is not allowed.".to_string())
+            [more_rest.., Token {contents: TokenContents::Symbol ("?"), ..}] =>
+                return Err (token::fail_token(at, "Nesting like ? ? : : is not allowed.".to_string())),
             
-            [more_rest.., token] =>
-                scan(a.into_iter().chain(vec![token]).collect(), more_rest.to_vec()),
+            [more_rest.., token] => {
+            	a.push(token);
+            	rest = more_rest;
+            }
             
-            [] => token::fail_token(at, ": expected somewhere to right of ?".to_string()),
+            [] => return Err (token::fail_token(at, ": expected somewhere to right of ?".to_string())),
         }
     }
-    scan(vec![], future)
+}
+
+/* Works like Perl // */
+pub fn ifndef(past: SingleLine, at: &CodePosition, future: SingleLine) -> Result<SingleLine, CompilationError> {
+    let (target, key) = match &*past {
+        [ref token @ Token {contents: TokenContents::Word (name), ..}] =>
+        	(clone_word(at, "scope"), clone_atom(token, name)),
+    	
+        [left] =>
+        	return Err (token::fail_token(left, "Either a variable name or a field access is expected to left of //").unwrap_err()),
+    	
+        [more_tokens.., token] =>
+        	(new_past(at, moreTokens), token),
+    	
+        [] => return Err (token::fail_token(at, "Nothing found to left of // operator").unwrap_err()),
+    };
+    
+    Ok (vec![
+    	clone_word(at, "check"),
+    	target,
+    	key,
+    	new_future_closure(at, future)
+	])
 }
 
 /* Assignment operator-- semantics are relatively complex. See manual.md. */
@@ -337,26 +362,38 @@ pub fn assignment(past: SingleLine, at: &CodePosition, future: SingleLine) -> Si
             None => new_future(at, future),
 
             /* Bindings exist: This is a function definition. */
-            Some (bindings) => token::clone_group(at, TokenClosureKind::ClosureWithBinding (true, bindings.into_iter().rev().collect()),
-                TokenScopeKind::Plain, vec![], vec![process(future)]),
+            Some (bindings) => token::clone_group(
+            	at,
+            	TokenClosureKind::ClosureWithBinding (true, bindings.into_iter().rev().collect()),
+            	TokenScopeKind::Plain,
+            	vec![],
+            	vec![process(future)]
+            ),
         };
 
         /* Recurse to try again with a different command. */
         /* TODO: This is all wrong... set should be default, let should be the extension.
            However this will require... something to allow [] to work right. */
-        fn result_for_command(cmd_at: CodePosition, cmd: String, lookups: SingleLine) -> SingleLine {
-
+        let mut cmd_at = at;
+        let mut cmd = "let".to_string();
+        let mut lookups = lookups;
+        // CodePosition -> String -> SingleLine -> Result<SingleLine, CompilationError>
+        let result_for_command = |cmd_at, cmd, lookups| loop {
+        	
             /* Done with bindings now, just have to figure out what we're assigning to */
             match (&*lookups, &*cmd) {
                 /* ...Nothing? */
-                ([], _) => token::fail_token(at, "Found a =, but nothing to assign to.".to_string()),
+                ([], _) => return Err (token::fail_token(at, "Found a =, but nothing to assign to.").unwrap_err()),
 
                 /* Sorta awkward, detect the "nonlocal" prefix and swap out let. This should be generalized. */
-                ([more_lookups.., cmd_token @ Token {contents: TokenContents::Word ("nonlocal"), ..}], "let") =>
-                	result_for_command(cmd_token, value::SET_KEY_STRING, more_lookups),
+                ([more_lookups.., cmd_token @ Token {contents: TokenContents::Word ("nonlocal"), ..}], "let") => {
+                	cmd_at = cmd_token;
+                	cmd = value::SET_KEY_STRING.to_string();
+                	lookups = more_lookups.to_vec();
+            	}
 
                 /* Looks like a = b */
-                ([token], _) => vec![
+                ([token], _) => return Ok (vec![
                 	clone_word(&cmd_at, cmd),
                 	/* FIXME: Nothing now prevents assigning to a number in a plain scope? */
                     match token {
@@ -365,7 +402,7 @@ pub fn assignment(past: SingleLine, at: &CodePosition, future: SingleLine) -> Si
                         token => token,
                     },
                     rightside
-                ],
+                ]),
 
                 /* Looks like a b ... = c */
                 ([more_lookups.., first_token], _) => match &*more_lookups {

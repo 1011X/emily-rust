@@ -150,7 +150,7 @@ pub enum TableBlankKind {
 /* For making a scope inside an object literal */
 pub enum TableBoxKind {
 	BoxNew (token::BoxKind),
-	BoxValue (Value)
+	BoxValue (Value),
 }
 
 pub struct ExecuteStarter {
