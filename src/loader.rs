@@ -1,5 +1,7 @@
 /* Set up environment and invoke Execute */
 
+use std::fs;
+
 use value::{
 	Value,
 	ExecuteStarter,
@@ -121,7 +123,7 @@ lazy_static! {
 /* FIXME: Couldn't kind be NewScope and the starter impose the box? */
 pub fn load_file(starter: ExecuteStarter, project_source: LoaderSource, directory: LoaderSource, path) -> {
     /* FIXME: What if known_filter is NoSource here? This is the "file where expected a directory" case. */
-    let buf = tokenize::tokenize_channel(CodeSource::File(path), open_in(path));
+    let buf = tokenize::tokenize_channel(CodeSource::File (path), fs::File::open(path));
     execute_package(starter, known_filter(project_source), known_filter(directory), buf)
 }
 

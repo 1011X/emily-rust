@@ -4,10 +4,6 @@
 #[macro_use]
 extern crate lazy_static;
 
-use pretty;
-use options;
-use tokenize;
-
 use std::collections::HashMap;
 use value::*;
 use token::*;
@@ -327,12 +323,12 @@ pub fn make_let<F: Fn(Value, Value)>(action: F) -> Value {
 /* Helpers for table_blank */
 pub fn populate_with_has(t: &mut TableValue) {
 	/* FIXME: Should this ever be ObjectValue...? */
-	table_set_string(t, value::HAS_KEY_STRING, make_has(Value::Table (t.clone())));
+	t.insert(Value::Atom (HAS_KEY_STRING.to_string()), make_has(Value::Table (t.clone())));
 }
 
 pub fn populate_with_set(t: &mut TableValue) {
 	populate_with_has(t);
-	table_set_string(t, value::SET_KEY_STRING, make_set(Value::Table (t.clone())));
+	t.insert(Value::Atom (SET_KEY_STRING.to_string()), make_set(Value::Table (t.clone())));
 }
 
 /* Not unified with table_blank because it returns a value */
@@ -341,20 +337,20 @@ pub fn object_blank(context: ExecuteContext) -> Value {
 	let obj_value = Value::Object (obj.clone());
 	
 	populate_with_has(&mut obj);
-	table_set_string(&mut obj,
-		value::SET_KEY_STRING,
+	obj.insert(
+		Value::Atom (SET_KEY_STRING.to_string()),
 		Value::Closure (make_object_set(obj_value.clone()))
 	);
-	table_set_string(&mut obj,
-		value::LET_KEY_STRING,
+	obj.insert(
+		Value::Atom (LET_KEY_STRING.to_string()),
 		make_let(act_table_set_with(
 			rethis_assign_object_inside_let,
 			obj_value,
 			obj
 		))
 	);
-	table_set_string(&mut obj,
-		value::PARENT_KEY_STRING,
+	obj.insert(
+		Value::Atom (PARENT_KEY_STRING.to_string()),
 		context.object_proto
 	);
 	obj_value
@@ -362,9 +358,8 @@ pub fn object_blank(context: ExecuteContext) -> Value {
 
 /* FIXME: Once act_table_set no longer takes a table value, the dummy Value::Table will not be needed */
 pub fn populate_let_for_scope(store_in: TableValue, write_to: TableValue) {
-	table_set_string(
-		store_in,
-		value::LET_KEY_STRING,
+	store_in.insert(
+		Value::Atom (LET_KEY_STRING.to_string()),
 		make_let(
 			act_table_set(
 				Value::Table (write_to),
@@ -373,12 +368,6 @@ pub fn populate_let_for_scope(store_in: TableValue, write_to: TableValue) {
 		)
 	)
 }
-
-
-let populateLetForScope storeIn writeTo =
-    tableSetString storeIn Value.letKeyString (makeLet (actTableSet (TableValue writeTo) writeTo))
-
-
 
 /* Give me a simple table of the requested type, prepopulate with basics. */
 pub fn table_blank(kind: TableBlankKind) -> TableType {

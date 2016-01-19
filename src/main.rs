@@ -55,7 +55,7 @@ fn main() {
     
 	if options::RUN.repl {
 		if cfg!(BUILD_INCLUDE_REPL) {
-			repl::repl(options::RUN.targets);
+			repl::repl(&options::RUN.target);
 		}
 	}
 	else {

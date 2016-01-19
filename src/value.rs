@@ -198,10 +198,6 @@ lazy_static! {
 }
 
 // Really needed?
-pub fn table_set_string(table: &mut TableValue, key: &'static str, value: Value) {
-	table.insert(Value::Atom (key.to_string()), value);
-}
-
 pub fn table_set_option(table: &mut TableValue, key: Value, value: Option<Value>) {
 	if let Some(v) = value {
 		table.insert(key, v);

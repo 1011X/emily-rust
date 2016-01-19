@@ -50,6 +50,9 @@ pub fn fake_register_from(reg: RegisterState) -> ExecuteFrame {
 
 static START: Once = ONCE_INIT;
 
+pub fn init() {
+// may seem like we can remove START, but it ensures that the initialization
+// only ever occurs once for this module when calling init().
 START.call_once(|| {
 	let set_atom_value = |table, name, v| table.unwrap_or(INTERNAL_TABLE).insert(Value::Atom(name), v);
 	let set_atom_fn = |table, n, func| set_atom_value(table, n, Value::BuiltinFunction(func));
@@ -63,10 +66,6 @@ START.call_once(|| {
 		set_atom_value(table, n, sub_value);
 		sub_table
 	};
-
-	/* FIXME: At some point consolidate all these adhoc functions in one place. */
-	// XXX Replaced by unreachable!()
-	// let internal_fail = || panic!("Internal consistency error: Reached impossible place");
 
 	/* Create a function that consumes an argument, then returns itself. `func` should return void */
 	// TODO
@@ -96,7 +95,7 @@ START.call_once(|| {
 			Value::Null
 		}
 		[_, _, _] => failwith "Attempted to call setPropertyKey on something other than an object",
-		_ => unreachable!(),
+		_ => unreachable!("Internal consistency error: Reached impossible place"),
 	}));
 
 	set_atom_value(None, "fail", Value::BuiltinHandoff (|_, stack, value| {
@@ -113,7 +112,9 @@ START.call_once(|| {
 		let o = value_util::object_blank(context);
 		let mut ot = value::table_from(o);
 		let ref args = options::RUN.args;
-		value::table_set_string(ot, "count", Value::Float(args.len() as f64);
+		
+		ot.insert(Value::Atom ("count".to_string()), Value::Float (args.len() as f64));
+		
 		for (i, st) in args.iter().enumerate() {
 			ot.insert(Value::Float (i as f64), Value::String(st));
 		}
@@ -131,13 +132,13 @@ START.call_once(|| {
 	let set_atom_math = |table, name, f| set_atom_value(Some (table.unwrap_or(double_table)), name, value_util::snippet_closure(2, |x| match &*x {
 		[Value::Float (f1), Value::Float (f2)] => Value::Float (f(f1, f2)),
 		[Value::Float (_), _] => failwith "Don't know how to combine that with a number",
-		_ => unreachable!(),
+		_ => unreachable!("Internal consistency error: Reached impossible place"),
 	}));
 
 	let set_atom_test = |table, name, f| set_atom_value(Some (table.unwrap_or(double_table)), name, value_util::snippet_closure(2, |x| match &*x {
 		[Value::Float (f1), Value::Float (f2)] => value_util::bool_cast(f(f1, f2)),
 		[Value::Float (_), _] => failwith "Don't know how to compare that to a number",
-		_ => unreachable!(),
+		_ => unreachable!("Internal consistency error: Reached impossible place"),
 	}));
 
 	let set_atom_math_fn = |table, name, f| set_atom_fn(Some (table.unwrap_or(double_table)), name, |x| match x {
@@ -181,7 +182,7 @@ START.call_once(|| {
 		_ => failwith "Can only perform that operation on a string"
 	}));
 
-	let uchar_to_codepoint = |u| Value::Float (u as i32);
+	let uchar_to_codepoint = |u| Value::Float (u as f64);
 	let uchar_to_string = |u| {
 		let buffer = String::new();
 		let enc = Uutf.encoder(`UTF_8, `Buffer (buffer));
@@ -214,7 +215,7 @@ START.call_once(|| {
 	set_atom_value(Some (string_table), "concat", value_util::snippet_closure(2, |x| match &*x {
 		[Value::String (f1), Value::String (f2)] => Value::String (format!("{}{}", f1, f2)),
 		[Value::String (_), _] => failwith "Don't know how to combine that with a string",
-		_ => unreachable!(),
+		_ => unreachable!("Internal consistency error: Reached impossible place"),
 	}));
 
 	/* "Submodule" internal.type */
@@ -233,9 +234,10 @@ START.call_once(|| {
 		set_atom_fn(Some (ffi_table), "newForeign", |_| {
 			let foreigner = {name=None; args=[]; returning="void"};
 			let table = value_util::table_blank(TableBlankKind::NoSet);
-			let set_ffi_param = |what, func| value::table_set_string(table, what, Value::BuiltinFunction (|a| match a {
-				Value::Atom (s) | Value::String (s) => { func(s); Value::Null }
-				x => failwith @@ format!("Need key {} for ffi {}; expected string or atom", x, what)
+			let set_ffi_param = |what, func| table.insert(Value::Atom (what), Value::BuiltinFunction (|a| match a {
+				Value::Atom (s) |
+				Value::String (s) => { func(s); Value::Null }
+				x => failwith @@ format!("Need key {} for ffi {}; expected string or atom", x, what),
 			}));
 			set_ffi_param("name", |s| foreigner.name = Some (s));
 			set_ffi_param("return", |s| foreigner.returning = s);
@@ -244,7 +246,7 @@ START.call_once(|| {
 				t.push(s);
 				t
 			});
-			value::table_set_string(table, "make", Value::BuiltinFunction (|_|
+			table.insert(Value::Atom ("make".to_string()), Value::BuiltinFunction (|_|
 				match foreigner.name {
 					None => failwith "No name provided for FFI function",
 					Some (name) =>
@@ -256,4 +258,5 @@ START.call_once(|| {
 	}
 
 	/* Done */
-})
+});
+}
