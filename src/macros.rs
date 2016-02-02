@@ -106,7 +106,7 @@ pub fn process(l: SingleLine) -> SingleLine {
     }
 
     /* Search for macro to process next. Priority None/line None means none known yet. */
-    fn find_ideal(best_priority: Option<MacroPriority>, best_line, past: SingleLine, present, future) -> Option<MacroMatch> {
+    fn find_ideal(best_priority: Option<MacroPriority>, best_line: SingleLine, past: SingleLine, present: Token, future: SingleLine) -> Option<MacroMatch> {
         /* Iterate cursor */
         let proceed = |priority, line| match &*future {
             /* Future is empty, so future has iterated to end of line */
@@ -231,7 +231,7 @@ pub fn arrange(at: &CodePosition, past: SingleLine, present: Token, future: Sing
 pub fn make_splitter(atom_string: String) -> MacroFunction {
 	box move |past, at, future|
 		vec![new_past(at, past), clone_atom(at, atom_string), new_future(at, future)]
-)
+}
 
 /* Given argument "op", make a macro to turn `OP a` into `((a) .op)` */
 pub fn make_unary(atom_string: String) -> MacroFunction {
@@ -240,7 +240,7 @@ pub fn make_unary(atom_string: String) -> MacroFunction {
             arrange(at, past, vec![a, clone_atom(at, atom_string)], far_future.to_vec()),
         _ => token::fail_token(at, format!("{} must be followed by something", pretty::dump_code_tree_terse(at))),
     }
-)
+}
 
 /* Given argument "op", make a macro to turn `OP a` into `(op (a))` */
 pub fn make_prefix_unary(word_string: String) -> MacroFunction {
@@ -249,20 +249,20 @@ pub fn make_prefix_unary(word_string: String) -> MacroFunction {
             arrange(at, past, vec![clone_word(at, word_string), a], far_future.to_vec()),
         _ => token::fail_token(at, format!("{} must be followed by something", pretty::dump_code_tree_terse(at))),
     }
-)
+}
 
 /* Given argument "op", make a macro to turn `a b … OP d e …` into `(op ^(a b …) ^(d e …)` */
 pub fn make_short_circuit(word_string: String) -> MacroFunction {
 	box move |past, at, future|
 		vec![clone_word(at, word_string), new_past_closure(at, past), new_future_closure(at, future)]
-)
+}
 
 pub fn make_splitter_invert(atom_string: String) -> MacroFunction {
 	box move |past, at, future|
     vec![clone_word(at, "not".to_string()), new_future(at,
         vec![new_past(at, past), clone_atom(at, atom_string), new_future(at, future)]
     )]
-)
+}
 
 /* One-off macros */
 
@@ -417,7 +417,7 @@ pub fn assignment(past: SingleLine, at: &CodePosition, future: SingleLine) -> Si
                     _ => token::fail_token(at, "Internal failure: Reached impossible place".to_string()),
                 },
             }
-        }
+        };
 
         result_for_command(at, "let".to_string(), lookups)
     };
@@ -471,11 +471,11 @@ pub fn closure_construct(with_return: bool) -> MacroFunction {
                     open_closure(bindings.into_iter().chain(vec![b]).collect(), more_future),
 
                 /* This is a group, we are done now. */
-                [Token {contents: TokenContents::Group(TokenGroup  {closure: TokenClosureKind::NonClosure, kind, group_initializer, items}}, more_future..] => match kind {
+                [Token {contents: TokenContents::Group(TokenGroup {closure: TokenClosureKind::NonClosure, kind, group_initializer, items}), ..}, more_future..] => match kind {
                         /* They asked for ^[], unsupported. */
                         TokenGroupKind::Box (_) => token::fail_token(at, "Can't use object literal with ^"),
                         /* Supported group */
-                        _ => arrange_token(at, past, token::clone_group(at, TokenClosureKind::ClosureWithBinding (with_return, bindings.into_iter().rev().collect())), kind, group_initializer, items), more_future.to_vec()),
+                        _ => arrange_token(at, past, token::clone_group(at, TokenClosureKind::ClosureWithBinding (with_return, bindings.into_iter().rev().collect()), kind, group_initializer, items), more_future.to_vec()),
                 },
 
                 /* Reached end of line */
@@ -491,6 +491,7 @@ pub fn closure_construct(with_return: bool) -> MacroFunction {
 }
 
 /* Commas in statement */
+// TODO: uhh, check original source and revise this.
 pub fn comma(past: SingleLine, at: CodePosition, future: SingleLine) -> SingleLine {
     /* Split statement into comma-delimited sections. Generates a reverse list of token reverse-lists */
     fn gather(accumulate_line: SingleLine, accumulate_all: Vec<SingleLine>, future: SingleLine) -> Vec<SingleLine> {
@@ -509,7 +510,7 @@ pub fn comma(past: SingleLine, at: CodePosition, future: SingleLine) -> SingleLi
         }
     }
     /* Given reverse list of reverse-list-of-tokens, create a list of this.append statements */
-    fn emit(accumulate_final: SingleLine, sub_lines: Vec<SingleLine>) -> SingleLine{
+    fn emit(accumulate_final: SingleLine, sub_lines: Vec<SingleLine>) -> SingleLine {
         match &*sub_lines {
             /* Finished */
             [] => accumulate_final,
@@ -529,7 +530,7 @@ pub fn comma(past: SingleLine, at: CodePosition, future: SingleLine) -> SingleLi
     	}
 	}
     /* Pull apart past with gather, stitch back together with emit, we now have a list of statements we can turn into a group. */
-    vec![clone_group(at, emit(vec![], gather(vec![], vec![past], future))]
+    vec![clone_group(at, emit(vec![], gather(vec![], vec![past], future)))]
 }
 
 /* Atom */
@@ -600,7 +601,7 @@ lazy_static! {
 		(R(40.), "/", make_splitter("divide")),
 		(R(40.), "*", make_splitter("times")),
 		(R(40.), "%", make_splitter("mod")),
-		(R(50.), "-", make_dual_mode_splitter "negate" "minus")),
+		(R(50.), "-", make_dual_mode_splitter("negate" "minus")),
 		(R(50.), "+", make_splitter("plus")),
 
 		/* Comparators */

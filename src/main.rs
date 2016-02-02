@@ -1,7 +1,6 @@
 /* Loads a program and runs it, based on contents of Options. */
 
 mod arg_plus;
-mod builtin;
 mod execute;
 mod macros;
 mod value;
@@ -24,7 +23,8 @@ fn main() {
     let process_one = |target| {
         let buf = match target {
             ExecutionTarget::File (f) =>
-            	tokenize::tokenize_channel(CodeSource::File (f), try!(fs::File::open(f))),
+            	// TODO: handle .unwrap() assertion below
+            	tokenize::tokenize_channel(CodeSource::File (f), fs::File::open(f).unwrap()),
             ExecutionTarget::Stdin =>
             	tokenize::tokenize_channel(CodeSource::Stdin, io::stdin()),
             ExecutionTarget::Literal (s) =>
@@ -53,25 +53,20 @@ fn main() {
 		}
     };
     
-	if options::RUN.repl {
-		if cfg!(BUILD_INCLUDE_REPL) {
-			repl::repl(&options::RUN.target);
-		}
+	if options::RUN.repl && cfg!(BUILD_INCLUDE_REPL) {
+		repl::repl(&options::RUN.target);
 	}
 	else {
 	    /* FIXME: This is maybe awkward? It is here so print_package can work without a target. */
 	    /* It works by assuming an implicit -e '', which is only safe if we assume */
 	    /* option.ml would have failed already if that weren't ok. */
-		let result = process_one(match options::RUN.target {
-			None => ExecutionTarget::Literal ("".to_string()),
-			Some (t) => t
-		});
+		let result = process_one(options::RUN.target
+			.as_ref()
+			.unwrap_or(ExecutionTarget::Literal ("".to_string()))
+		);
 		
 		match result {
-			Err (EmilyError::CompilationError (e)) => {
-				writeln!(io::stderr(), "{}", e);
-				exit(1);
-			}
+			Err (EmilyError::CompilationError (e)) |
 			Err (EmilyError::Failure (e)) => {
 				writeln!(io::stderr(), "{}", e);
 				exit(1);

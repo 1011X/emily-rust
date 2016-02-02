@@ -16,9 +16,8 @@ use ocaml::arg;
 use ocaml::arg::Spec;
 
 /* I use this to turn a single set of rules into simultaneously environment and argument parse rules. See options.ml */
-pub fn key_mutate<F, V>(f: F, vec: V) -> V where
-F: FnOnce(Vec<arg::Key>) -> Vec<arg::Key>,
-V: Vec<(Vec<arg::Key>, arg::Spec, arg::Doc)> {
+pub fn key_mutate<F>(f: F, vec: Vec<(Vec<arg::Key>, arg::Spec, arg::Doc)>) -> Vec<(Vec<arg::Key>, arg::Spec, arg::Doc)> where
+F: FnOnce(Vec<arg::Key>) -> Vec<arg::Key> {
 	vec.iter().cloned().map(|(a, b, c)| (f(a), b, c)).collect()
 }
 
@@ -35,7 +34,7 @@ pub enum Error {
 }
 
 /* Takes the rule list normally given as first argument to Arg.parse and parses env vars against it. */
-pub fn env_parse(arg: Vec<(arg::Key, arg::Spec, arg::Doc)>) -> Result<(), Failure> {
+pub fn env_parse(arg: Vec<(arg::Key, arg::Spec, arg::Doc)>) -> Result<(), ocaml::Failure> {
 	for (key, spec, _) in arg {
 		/* Rather than iterating env, iterate the rule list and check for each env we recognize */
 		let value = match env::var(key) { /* May fail */
@@ -77,7 +76,7 @@ G: Fn(Vec<String>) {
 	let proceed = || while let Some (key) = rest.next() { /* Argument found */
 		match lookup.get(&key) {
 			/* This is a known argument and it has no arguments */
-			Some (Spec::Unit (f)) => return Ok(f()),
+			Some (Spec::Unit (f)) => return Ok (f()),
 
 			/* This is a known argument and it has one argument, a string */
 			Some (Spec::String (f)) => return match rest.next() {
@@ -104,10 +103,10 @@ G: Fn(Vec<String>) {
 							
 							match lookup.get(sub_key) {
 								/* The argument is recognized, but can't be used with = */
-								Some (Spec::Unit (_)) => Err (Spec::Bad (format!("option '{}' does not take an argument.", sub_key)))
+								Some (Spec::Unit (_)) => Err (Spec::Bad (format!("option '{}' does not take an argument.", sub_key))),
 
 								/* The argument is recognized and we can work with it */
-								Some (Spec::String (f)) => Ok(f(sub_value)),
+								Some (Spec::String (f)) => Ok (f(sub_value)),
 
 								/* Incorrect use of ArgPlus */
 								Some (_) => arg_plus_limitations("arg_parse"),
@@ -129,27 +128,33 @@ G: Fn(Vec<String>) {
 	};
 
 	/* Error/exceptional situation handling */
-	let name = match rest.next() {
-		Some (s) => s, /* argv[0] is executable name */
-		None => "(INTERNAL ERROR)".to_string() /* None implies argc==0, so we won't ever be displaying this anyway? */
-	};
+	/* argv[0] is executable name */
+	/* None implies argc==0, so we won't ever be displaying this anyway? */
+	let name = rest.next().unwrap_or("(INTERNAL ERROR)".to_string());
 	
 	match {
 		match proceed() {
 			/* An arg rule requested the help be shown using the Arg interface. */
-			Err (Arg.Help (_)) => Err (Error::HelpExit (0)), /* FIXME: What is the argument to Arg.Help for? It isn't documented. */
+			Err (ocaml::Error::Help (_)) => Err (Error::HelpExit (0)), /* FIXME: What is the argument to Arg.Help for? It isn't documented. */
 
 			/* An arg rule requested a premature halt to processing. */
-			Err (Complete) => Ok(()),
+			Err (Complete) => Ok (()),
 			
 			/* We ended without failing, so call the complete handler */
 			_ => on_complete(!rest)
 		}
 	} {
 		/* Something requested the help be shown */
-		| Help i -> Arg.usage rules usage; exit i
+		Error::Help(i) => {
+			Arg::usage(rules, usage);
+			exit(i);
+		}
 
 		/* Something requested we flag failure to the user */
-		| Arg.Bad s -> prerr_endline @@ name^": "^s; Arg.usage rules usage; exit 1
+		Error::Bad(s) => {
+			writeln!(std::io::stderr(), "{}: {}", name, s);
+			Arg::usage(rules, usage);
+			exit(1);
+		}
 	}
 }

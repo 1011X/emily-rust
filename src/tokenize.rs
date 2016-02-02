@@ -44,7 +44,7 @@ pub fn group_close_human_readable(kind: &GroupCloseToken) -> String {
 /* Entry point to tokenize, takes a filename and a lexbuf */
 /* TODO: Somehow strip blank lines? */
 // Error: CompilationError + Failure
-pub fn tokenize(enclosingKind: TokenGroupKind, name: CodeSource, buf) -> Result<Token, Error> {
+pub fn tokenize(enclosingKind: TokenGroupKind, name: CodeSource, mut buf: String) -> Result<Token, Error> {
     /* -- Helper regexps -- */
     //let digit = Expr::parse("[0-9]").unwrap();
     let number = Expr::parse("[:digit:]+").unwrap();
@@ -192,7 +192,7 @@ pub fn tokenize(enclosingKind: TokenGroupKind, name: CodeSource, buf) -> Result<
     };
 
     /* Sub-parser: backslash. Eat up to, and possibly including, newline */
-    fn escape(seen_text: bool) -> Result<(), CompilationError> {
+    let escape = |seen_text| {
         let backtrack = || Sedlexing.backtrack(buf);
         match buf {
             /* Have reached newline. We're done. If no command was issued, eat newline. */
@@ -209,20 +209,25 @@ pub fn tokenize(enclosingKind: TokenGroupKind, name: CodeSource, buf) -> Result<
             any => Err(parse_fail("Did not recognize text after backslash.").unwrap_err()),
             _ => unreachable!()
         }
-    }
+    };
 
     /* Main loop. */
     /* Takes a constructor that's prepped with all the properties for the enclosing group, and
        needs only the final list of lines to produce a token. Returns a completed group. */
     
     // Error: CompilationError + Failure
-    fn proceed<F>(group_close: GroupCloseRecord, group_seed: F, lines: Vec<>, line: Vec<>) -> Result<Token, Error> where
+    fn proceed<F>(group_close: GroupCloseRecord, group_seed: F, lines: Vec<Vec<Token>>, line: Vec<Token>) -> Result<Token, Error> where
     F: Fn(Vec<Token>, CodeSequence) -> Token {
         /* Constructor for a token with the current preserved codeposition. */
         let make_token_here = token::make_token(current_position());
 
         /* Right now all group closers are treated as equivalent. TODO: Don't do it like this. */
-        let close_pattern = [%sedlex.regexp? '}' | ')' | ']' | eof];
+        let close_pattern = Expr::Alternate (vec![
+        	Expr::Literal {chars: vec!['}'], casei: true},
+        	Expr::Literal {chars: vec![')'], casei: true},
+        	Expr::Literal {chars: vec![']'], casei: true},
+        	Expr::EndText,
+        ]);
 
         /* Recurse with the same groupSeed we started with. */
         let proceed_with_lines = |ls, l| proceed(group_close, group_seed, ls, l);
@@ -258,7 +263,7 @@ pub fn tokenize(enclosingKind: TokenGroupKind, name: CodeSource, buf) -> Result<
         let close_group = |cs| group_seed(cleanup(lines_plus_line()), cs);
 
         /* Helper: Given a string->tokenContents mapping, make the token, add it to the line and recurse */
-        fn add_single<F: Fn(String) -> TokenContents>(constructor: F) -> {
+        fn add_single<F: Fn(String) -> TokenContents>(constructor: F) -> Vec<Token> {
         	add_to_line_proceed(make_token_here(constructor(matched_lexemes())))
         }
 
@@ -270,7 +275,7 @@ pub fn tokenize(enclosingKind: TokenGroupKind, name: CodeSource, buf) -> Result<
                 _ => return Err(parse_fail("Internal failure: interpreter is confused about parenthesis").unwrap_err()),
             };
             
-            Ok((GroupCloseToken::Char (ch), current_position()))
+            Ok ((GroupCloseToken::Char (ch), current_position()))
         };
 
         let group_close_under_token = || match matched_lexemes() {
@@ -279,7 +284,7 @@ pub fn tokenize(enclosingKind: TokenGroupKind, name: CodeSource, buf) -> Result<
         };
 
         /* Recurse with blank code, and a new group_seed described by the arguments */
-        fn open_group(closure_kind: TokenClosureKind, group_kind: TokenGroupKind) ->  {
+        fn open_group(closure_kind: TokenClosureKind, group_kind: TokenGroupKind) -> Result<Token, Error> {
             proceed(
             	group_close_make_from(matched_lexemes()),
                 |l, cs| token::make_group(&current_position(), &closure_kind, &group_kind, l, cs),
@@ -294,7 +299,11 @@ pub fn tokenize(enclosingKind: TokenGroupKind, name: CodeSource, buf) -> Result<
         /* Now finally here's the actual grammar... */
         match buf {
             /* Ignore comments */
-            ('#', Star (Compl '\n')) => skip(),
+            ('#', Expr::Repeat {
+            	e: box Expr::Class(),
+            	r: Repeater::ZeroOrMore,
+            	greedy: true
+            }Star (Compl '\n')) => skip(),
 
             /* On ANY group-close symbol, we end the current group */
             close_pattern => {
@@ -308,10 +317,10 @@ pub fn tokenize(enclosingKind: TokenGroupKind, name: CodeSource, buf) -> Result<
                 else {
                 	match candidate_close {
 		                /* No close before EOF: Failure is positioned at the opening symbol */
-		                GroupCloseToken::Eof => Err(token::incomplete_at(group_close_at,
+		                GroupCloseToken::Eof => Err (token::incomplete_at(group_close_at,
 		                    &format!("Did not find matching {} anywhere before end of file. Opening symbol:", group_close_human_readable(group_close))).unwrap_err())
 		                /* Close present, but wrong: Failure is positioned at closing symbol */
-		                GroupCloseToken::Char (_) => Err(parse_fail(
+		                GroupCloseToken::Char (_) => Err (parse_fail(
                         format!("Expected closing {} but instead found {}", group_close_human_readable(group_close), group_close_human_readable(candidate_close))).unwrap_err())
                     }
                 }
@@ -324,8 +333,8 @@ pub fn tokenize(enclosingKind: TokenGroupKind, name: CodeSource, buf) -> Result<
     		}))),
 
             /* Floating point number */
-            // FIXME: try parse
-            float_pattern => add_single(|x| TokenContents::Number (try!(x.parse::<f64>()))),
+            // TODO: handle .unwrap() below
+            float_pattern => add_single(|x| TokenContents::Number (x.parse::<f64>().unwrap())),
 
             /* Local scope variable */
             word_pattern => add_single(|x| TokenContents::Word (x)),

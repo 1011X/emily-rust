@@ -12,6 +12,11 @@ mod arg {
 		Unit (Box<FnBox()>),
 		String (Box<FnBox(String)>),
 	}
+	
+	pub enum Error {
+		Help (String),
+		Bad (String),
+	}
 }
 
 pub fn failwith(s: String) -> Result<(), Failure> {

@@ -18,8 +18,7 @@ use value::{
 /* --- Code printers --- */
 
 /* "Disassemble" a token tree into a human-readable string (specializable) */
-pub fn dump_code_tree_general<F>(group_printer: F, token: &Token) -> String where
-F: Fn(&Token, String, String, CodeSequence) -> String {
+pub fn dump_code_tree_general(group_printer: fn(&Token, String, String, CodeSequence) -> String, token: &Token) -> String {
     match token.contents {
     /* For a simple (nongrouping) token, return a string for just the item */
 		TokenContents::Word (x) |
@@ -27,6 +26,7 @@ F: Fn(&Token, String, String, CodeSequence) -> String {
 		TokenContents::String (x) => format!("\"{}\"", x),
 		TokenContents::Atom (x) => format!(".{}", x),
 		TokenContents::Number (x) => x.to_string(),
+		
 		TokenContents::Group (TokenGroup {kind, closure, items}) => {
 		    let (l, r) = match kind {
 		        TokenGroupKind::Plain => ("(", ")"),
@@ -35,9 +35,10 @@ F: Fn(&Token, String, String, CodeSequence) -> String {
 		    };
 		    
 		    let l = match closure {
-		        TokenGroupKind::NonClosure => "".to_string(),
-		        TokenGroupKind::ClosureWithBinding (_, binding) => 
-		        	format!("^{}", if binding == [] { "" } else { binding.join(" ") }),
+		        TokenGroupKind::NonClosure =>
+		        	"".to_string(),
+		        TokenGroupKind::ClosureWithBinding (_, ref binding) => 
+		        	format!("^{}", binding.join(" ")),
 		    } + l;
 		    
 		    /* GroupPrinter is an argument function which takes the left group symbol, right group
@@ -49,7 +50,7 @@ F: Fn(&Token, String, String, CodeSequence) -> String {
 
 /* "Disassemble" a token tree into a human-readable string (specialized for looking like code) */
 pub fn dump_code_tree_terse(token: &Token) -> String {
-    fn group_printer(token: &Token, l: String, r: String, items: CodeSequence) -> String {
+    fn group_printer(token: &Token, mut l: String, r: String, items: CodeSequence) -> String {
     	let eachline = |tokens| tokens.iter()
 			.map(|t| dump_code_tree_general(group_printer, t))
 			.collect::<Vec<_>>()
@@ -61,6 +62,7 @@ pub fn dump_code_tree_terse(token: &Token) -> String {
 			.join("; ")
 		+ &r
     }
+    
     dump_code_tree_general(group_printer, token)
 }
 
@@ -132,7 +134,8 @@ pub fn id_string_for_table(t: &TableValue) -> String {
 
 pub fn id_string_for_value(v: &Value) -> String {
 	match *v {
-		Value::Table (ref t) | Value::Object (ref t) => id_string_for_table(t),
+		Value::Table (ref t) | Value::Object (ref t) =>
+			id_string_for_table(t),
 		_ => "UNTABLE".to_string(),
 	}
 }
@@ -149,7 +152,7 @@ pub fn dump_value_tree_general(wrapper: fn(&str, &Value) -> String, v: &Value) -
         Value::BuiltinUnaryMethod (_) => "<property-builtin>".to_string(),
         Value::Closure (ClosureValue {exec: e, need_args: n}) => {
             let tag = match e {
-            	ClosureExec::User {..} => "closure",
+            	ClosureExec::User (_) => "closure",
             	ClosureExec::Builtin (_) => "closure-builtin"
             };
             format!("<{}/{}>", tag, n)
@@ -185,7 +188,7 @@ pub fn dump_value_unwrapped_table(t: &TableValue) -> String {
 
 pub fn dump_value_table(v: &Value) -> String {
 	v.to_string() + match *v {
-		Value::Table (t) | Value::Object (t) => &dump_value_unwrapped_table(t),
+		Value::Table (ref t) | Value::Object (ref t) => &dump_value_unwrapped_table(t),
 		_ => "",
 	}
 }

@@ -64,11 +64,11 @@ lazy_static! {
 	};
 }
 
-fn key_mutate_argument() -> {
+fn key_mutate_argument() -> Vec<(Vec<arg::Key>, arg::Spec, arg::Doc)> {
 	arg_plus::key_mutate(|l| format!("--{}", l.join("-")))
 }
 
-fn key_mutate_environment() -> {
+fn key_mutate_environment() -> Vec<(Vec<arg::Key>, arg::Spec, arg::Doc)> {
 	arg_plus::key_mutate(|l|
 		format!("EMILY_{}", l.iter()
 			.map(|s| s.to_uppercase())
@@ -79,12 +79,13 @@ fn key_mutate_environment() -> {
 }
 
 fn build_path_set_spec<F: Fn(String)>(name: [&'static str; 2], action: F, what_is: &'static str) -> ([&'static str; 2], Spec, String) {
-	(name, Spec::String(action), format!("Directory root for packages loaded from \"{}\"", what_is))
+	(name, Spec::String (action), format!("Directory root for packages loaded from \"{}\"", what_is))
 }
 
 
 static START: sync::Once = sync::ONCE_INIT;
 
+pub fn init() {
 START.call_once(|| {
 	let usage = *FULL_VERSION + "
 
@@ -97,7 +98,7 @@ Sample usage:
 + if cfg!(BUILD_INCLUDE_REPL) { "
     emily -i              # Run in interactive mode (REPL)
     emily -i filename.em  # ...after executing this program"
-else { "" } + "
+} else { "" } + "
 
 Options:";
 	/*
@@ -234,9 +235,11 @@ Options:";
 			RUN.args = progArgs;
 			if !RUN.dont_need_targets {
 				if let None = RUN.target {
-					Err (ArgPlus.Help 1) /* No targets! Fail and print help. */
+					Err (arg_plus::Error::Help (1)) /* No targets! Fail and print help. */
 				}
 			}
 		}
 	);
 });
+
+}

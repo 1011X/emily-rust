@@ -86,7 +86,7 @@ pub fn stack_frame(scope: Value, code: CodeSequence, at: CodePosition) -> Execut
 	}
 }
 
-pub fn fail_with_stack(stack: ExecuteStack, mesg: &str) -> Result <(), String> {
+pub fn fail_with_stack(stack: ExecuteStack, mesg: String) -> Result <(), String> {
     Err (format!("{}\n{}", mesg, value_util::stack_string(stack)))
 }
 
@@ -183,7 +183,7 @@ pub fn execute_step(context: ExecuteContext, stack: ExecuteStack) -> Value {
 
         /* Case #4: Applying a continuation: We can ditch all other context. */
         [more_frames.., frame @ ExecuteFrame {
-	    	register: RegisterState::FirstValue (Value::Continuation (continue_stack, at), ..),
+	    	register: RegisterState::FirstValue (Value::Continuation (continue_stack, at), _, _),
 	        ref code, ..
 		}]
 		/* "Match a nonempty two-dimensional list" */
@@ -447,10 +447,11 @@ pub fn apply(context: ExecuteContext, stack: ExecuteStack, this: Value, a: Value
         (_, Some (&Value::BuiltinMethod (f))) =>
         	r(Value::BuiltinFunction (f(this))),
     	
-        (_, Some (&Value::BuiltinUnaryMethod (f))) => r(
-            (try f(this) with
-                Failure (e) => failWithStack stack @@ format!("Runtime error, applying {} to {}: {}", a, bv, e)
-        )),
+        (_, Some (&Value::BuiltinUnaryMethod (f))) => r(match f(this) {
+        	Ok (v) => v,
+            Err (e) => fail_with_stack(stack, format!("Runtime error, applying {} to {}: {}", a, bv, e)),
+        }),
+        
         (Value::Object (_), Some (&c @ Value::Closure (_))) => r(value_util::raw_rethis_super_from(this, c)),
         (_, Some (&v)) => r(v),
         (_, None) => match (a, t.get(*value::PARENT_KEY)) {
@@ -494,7 +495,7 @@ pub fn apply(context: ExecuteContext, stack: ExecuteStack, this: Value, a: Value
                         	println!("Closure --> {}", pretty::dump_value_new_table(scope));
                         }
 
-                        if let Value::Table(mut ref t) = scope {
+                        if let Value::Table(ref mut t) = scope {
                             let add_bound = |keys, values| loop {
                                 match (keys, values) {
                                     ([], []) => break,
@@ -527,9 +528,14 @@ pub fn apply(context: ExecuteContext, stack: ExecuteStack, this: Value, a: Value
                         
                         execute_step(context, stack.iter().cloned().chained(vec![stack_frame(scope, exec.body, bat)]).collect())
                     }
-		            ClosureExec::Builtin (f) =>
-		                r(try (f bound) with
-		                    Failure e => failWithStack stack @@ "Runtime error, applying builtin closure to arguments ["^ (String.concat ", " @@ List.map Pretty.dumpValue bound) ^"]: " ^ e)
+                    
+		            ClosureExec::Builtin (f) => r(match f(bound) {
+		            	Ok (v) => v,
+	                    Err (e) => fail_with_stack(stack, format!("Runtime error, applying builtin closure to arguments [{}]: {}",
+					        bound.map(pretty::dump_value).join(", "),
+					        e
+					    )),
+				    }),
                 }
             };
             
@@ -565,7 +571,7 @@ pub fn apply(context: ExecuteContext, stack: ExecuteStack, this: Value, a: Value
         /* If applying a builtin special. */
         Value::BuiltinFunction (f) => r(match f(bv) {
             Err(ocaml::Failure (e)) =>
-            	fail_with_stack(stack, &format!("Runtime error, applying builtin function to {}: {}", bv, e)),
+            	fail_with_stack(stack, format!("Runtime error, applying builtin function to {}: {}", bv, e)),
             Err(e) => return Err(e),
             Ok(v) => v,
         }),

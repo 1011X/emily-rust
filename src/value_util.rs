@@ -10,7 +10,7 @@ use token::*;
 
 /* Misc failure throw methods */
 pub fn bad_arg(desired: &'static str, name: &'static str, var: &Value) -> Result<(), String> {
-	Err(format!("Bad argument to {}: Need {}, got {}", name, desired, pretty::dump_value(var)))
+	Err (format!("Bad argument to {}: Need {}, got {}", name, desired, pretty::dump_value(var)))
 }
 
 pub fn bad_arg_table(name: &'static str, var: &Value) -> Result<(), String> {
@@ -22,7 +22,7 @@ pub fn bad_arg_closure(name: &'static str, var: &Value) -> Result<(), String> {
 }
 
 pub fn impossible_arg(name: &'static str) -> Result<(), String> {
-	Err(format!("Internal failure: Impossible argument to {}", name))
+	Err (format!("Internal failure: Impossible argument to {}", name))
 }
 
 
@@ -31,7 +31,7 @@ pub fn misapply_string(a: &Value, b: &Value) -> String {
 }
 
 pub fn raw_misapply_arg(a: &Value, b: &Value) -> Result<(), String> {
-	Err(misapply_string(a, b))
+	Err (misapply_string(a, b))
 }
 
 /* Tools */
@@ -460,7 +460,7 @@ pub fn raw_rethis_super_from(obj: Value, v: Value) -> Value {
 }
 
 lazy_static! {
-	pub static ref RETHIS_SUPER_FROM : Value = snippet_closure(2, |args|
+	pub static ref RETHIS_SUPER_FROM: Value = snippet_closure(2, |args|
 		match &*args {
 			[obj, a] => raw_rethis_super_from(obj, a),
 			_ => impossible_arg("RETHIS_SUPER_FROM")
