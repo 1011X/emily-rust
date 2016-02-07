@@ -5,11 +5,13 @@
    The parts we'd think of a "parser" as usually doing will be handled in a second,
    currently unimplemented, macro-processing step. */
 
-extern crate regex_syntax;
+use std::io;
 
 use regex_syntax::{
 	Expr,
-	Repeater
+	Repeater,
+	CharClass,
+	ClassRange,
 };
 
 use token::{
@@ -20,6 +22,14 @@ use token::{
 	
 	CompilationError,
 };
+
+pub enum Error {
+	Compilation (token::CompilationError),
+	Failure (String),
+	Io (io::Error),
+}
+
+type Result<T> = std::result::Result<T, Error>;
 
 /* Tokenize uses sedlex which is inherently stateful, so tokenize for a single source string is stateful.
    This is the basic state for a file parse-- it basically just records the position of the last seen newline. */
@@ -43,32 +53,32 @@ pub fn group_close_human_readable(kind: &GroupCloseToken) -> String {
 
 /* Entry point to tokenize, takes a filename and a lexbuf */
 /* TODO: Somehow strip blank lines? */
-// Error: CompilationError + Failure
-pub fn tokenize(enclosingKind: TokenGroupKind, name: CodeSource, mut buf: String) -> Result<Token, Error> {
+pub fn tokenize(enclosingKind: TokenGroupKind, name: CodeSource, mut buf: String) -> Result<Token> {
+	use regex_syntax::Expr::*;
     /* -- Helper regexps -- */
-    //let digit = Expr::parse("[0-9]").unwrap();
-    let number = Expr::parse("[:digit:]+").unwrap();
-    let octal_digit = Expr::parse("[0-7]").unwrap();
-    let octal_number = Expr::parse("0o[0-7]+").unwrap();
-    let hex_digit = Expr::parse("[0-9a-fA-F]").unwrap();
-    let hex_number = Expr::parse("0x[:xdigit:]+").unwrap();
-    let binary_number = Expr::parse("0b[01]+").unwrap();
-    let letter_pattern = Expr::parse("[:alpha:]").unwrap();
-    let word_pattern = Expr::parse("[:alpha:][:alnum:]*").unwrap();
-    let sci_notation = Expr::parse("[eE][-+]?[:digit:]").unwrap();
-    let float_pattern = Expr::Alternate (vec![
-    	Expr::Concat (vec![
-    		Expr::Literal {
+    //let digit = parse("[0-9]").unwrap();
+    let number = parse("[:digit:]+").unwrap();
+    let octal_digit = parse("[0-7]").unwrap();
+    let octal_number = parse("0o[0-7]+").unwrap();
+    let hex_digit = parse("[0-9a-fA-F]").unwrap();
+    let hex_number = parse("0x[:xdigit:]+").unwrap();
+    let binary_number = parse("0b[01]+").unwrap();
+    let letter_pattern = parse("[:alpha:]").unwrap();
+    let word_pattern = parse("[:alpha:][:alnum:]*").unwrap();
+    let sci_notation = parse("[eE][-+]?[:digit:]").unwrap();
+    let float_pattern = Alternate (vec![
+    	Concat (vec![
+    		Literal {
     			chars: vec!['.'],
     			casei: true
 			},
 			number.clone(),
 		]),
-		Expr::Concat (vec![
+		Concat (vec![
 			number.clone(),
-			Expr::Repeat {
-				e: Box::new(Expr::Concat (vec![
-					Expr::Literal {
+			Repeat {
+				e: Box::new(Concat (vec![
+					Literal {
 						chars: vec!['.'],
 						casei: true
 					},
@@ -77,7 +87,7 @@ pub fn tokenize(enclosingKind: TokenGroupKind, name: CodeSource, mut buf: String
 				r: Repeater::ZeroOrOne,
 				greedy: true,
 			},
-			Expr::Repeat {
+			Repeat {
 				e: Box::new(sci_notation.clone()),
 				r: Repeater::ZeroOrOne,
 				greedy: true,
@@ -85,7 +95,7 @@ pub fn tokenize(enclosingKind: TokenGroupKind, name: CodeSource, mut buf: String
 		]),
 	]);
 	
-	let number_pattern = Expr::Alternate (vec![
+	let number_pattern = Alternate (vec![
 		hex_number.clone(),
 		octal_number.clone(),
 		float_pattern.clone(),
@@ -196,7 +206,7 @@ pub fn tokenize(enclosingKind: TokenGroupKind, name: CodeSource, mut buf: String
         let backtrack = || Sedlexing.backtrack(buf);
         match buf {
             /* Have reached newline. We're done. If no command was issued, eat newline. */
-            '\n' => Ok(if seen_text { backtrack() } else { state_newline() }),
+            '\n' => Ok (if seen_text { backtrack() } else { state_newline() }),
             /* Skip over white space until newline is reached */
             white_space => escape(seen_text),
             /* A second backslash? Okay, back out and let the main loop handle it */
@@ -215,18 +225,17 @@ pub fn tokenize(enclosingKind: TokenGroupKind, name: CodeSource, mut buf: String
     /* Takes a constructor that's prepped with all the properties for the enclosing group, and
        needs only the final list of lines to produce a token. Returns a completed group. */
     
-    // Error: CompilationError + Failure
-    fn proceed<F>(group_close: GroupCloseRecord, group_seed: F, lines: Vec<Vec<Token>>, line: Vec<Token>) -> Result<Token, Error> where
+    fn proceed<F>(group_close: GroupCloseRecord, group_seed: F, lines: Vec<Vec<Token>>, line: Vec<Token>) -> Result<Token> where
     F: Fn(Vec<Token>, CodeSequence) -> Token {
         /* Constructor for a token with the current preserved codeposition. */
         let make_token_here = token::make_token(current_position());
 
         /* Right now all group closers are treated as equivalent. TODO: Don't do it like this. */
-        let close_pattern = Expr::Alternate (vec![
-        	Expr::Literal {chars: vec!['}'], casei: true},
-        	Expr::Literal {chars: vec![')'], casei: true},
-        	Expr::Literal {chars: vec![']'], casei: true},
-        	Expr::EndText,
+        let close_pattern = Alternate (vec![
+        	Literal {chars: vec!['}'], casei: true},
+        	Literal {chars: vec![')'], casei: true},
+        	Literal {chars: vec![']'], casei: true},
+        	EndText,
         ]);
 
         /* Recurse with the same groupSeed we started with. */
@@ -242,19 +251,11 @@ pub fn tokenize(enclosingKind: TokenGroupKind, name: CodeSource, mut buf: String
         let matched_lexemes = || Sedlexing.Utf8.lexeme(buf);
 
         /* Complete current line & push onto current codeSequence */
-        let lines_plus_line = || {
-        	let mut l = lines.clone();
-        	l.push(complete_line(line));
-        	l
-        };
+        let lines_plus_line = || lines.iter().chain([complete_line(line)].iter()).cloned().collect::<Vec<_>>();
 
         /* Recurse with the groupSeed and lines we started with, & the argument pushed onto the current line */
         /* Notice stateNewLine and add_to_line_proceed are using ndifferent notions of a "line". */
-        let add_to_line_proceed = |x| proceed_with_line({
-        	let mut l = line.clone();
-        	l.push(x);
-        	l
-        });
+        let add_to_line_proceed = |x| proceed_with_line(l.iter().chain([x].iter()).cloned().collect());
 
         /* Recurse with the groupSeed we started with, the current line pushed onto the codeSequence, & a new blank line */
         let new_line_proceed = || proceed_with_lines(lines_plus_line(), vec![]);
@@ -295,15 +296,41 @@ pub fn tokenize(enclosingKind: TokenGroupKind, name: CodeSource, mut buf: String
 
         /* Variant assuming non-closure */
         let open_ordinary_group = open_group(TokenClosureKind::NonClosure);
+        
+        // TODO: There has to be a better way of doing this.
+        let case = Expr::Class(CharClass::new(vec![
+        	CharRange {begin: '"', end: '#'}, // covers ", #
+        	CharRange {begin: '(', end: ')'}, // covers (, )
+        	CharRange {begin: '[', end: ']'}, // covers [, \, ]
+        	CharRange {begin: '{', end: '{'}, // covers {
+        	CharRange {begin: '}', end: '}'}, // covers }
+        	CharRange {begin: '0', end: '9'}, // covers digit
+        	// covers all letters
+        	CharRange {begin: 'a', end: 'z'},
+        	CharRange {begin: 'A', end: 'Z'},
+        	// covers all of sedlex's white_space
+        	CharRange {begin: '\t', end: '\r'},
+        	CharRange {begin: ' ', end: ' '},
+        	CharRange {begin: 0x85 as char, end: 0x85 as char},
+        	CharRange {begin: 0xa0 as char, end: 0xa0 as char},
+        	CharRange {begin: 0x1680 as char, end: 0x1680 as char},
+        	CharRange {begin: 0x2000 as char, end: 0x200a as char},
+        	CharRange {begin: 0x2028 as char, end: 0x2029 as char},
+        	CharRange {begin: 0x202f as char, end: 0x202f as char},
+        	CharRange {begin: 0x205f as char, end: 0x205f as char},
+        	CharRange {begin: 0x3000 as char, end: 0x3000 as char},
+        ]));
 
         /* Now finally here's the actual grammar... */
+        // FIXME: This won't actually work. Must think of a way
+        // to match patterns on buffer somehow.
         match buf {
             /* Ignore comments */
-            ('#', Expr::Repeat {
-            	e: box Expr::Class(),
+            ('#', Repeat {
+            	e: box AnyCharNoNL,
             	r: Repeater::ZeroOrMore,
             	greedy: true
-            }Star (Compl '\n')) => skip(),
+            }) => skip(),
 
             /* On ANY group-close symbol, we end the current group */
             close_pattern => {
@@ -312,16 +339,19 @@ pub fn tokenize(enclosingKind: TokenGroupKind, name: CodeSource, mut buf: String
                 /* The expected group close comes packed with the position of the opening symbol */
                 let (group_close, group_close_at) = group_close;
                 /* This is a matching close */
-                if candidate_close == group_close { Ok(close_group()) }
+                if candidate_close == group_close {
+                	Ok (close_group())
+            	}
                 /* This is not a matching close */
                 else {
                 	match candidate_close {
 		                /* No close before EOF: Failure is positioned at the opening symbol */
 		                GroupCloseToken::Eof => Err (token::incomplete_at(group_close_at,
-		                    &format!("Did not find matching {} anywhere before end of file. Opening symbol:", group_close_human_readable(group_close))).unwrap_err())
+		                    &format!("Did not find matching {} anywhere before end of file. Opening symbol:", group_close_human_readable(group_close))).unwrap_err()),
 		                /* Close present, but wrong: Failure is positioned at closing symbol */
 		                GroupCloseToken::Char (_) => Err (parse_fail(
-                        format!("Expected closing {} but instead found {}", group_close_human_readable(group_close), group_close_human_readable(candidate_close))).unwrap_err())
+                        	format!("Expected closing {} but instead found {}", group_close_human_readable(group_close), group_close_human_readable(candidate_close))).unwrap_err()
+                    	)
                     }
                 }
             }
@@ -358,9 +388,8 @@ pub fn tokenize(enclosingKind: TokenGroupKind, name: CodeSource, mut buf: String
             '(' => add_to_line_proceed(open_ordinary_group(TokenGroupKind::Plain)),
             '{' => add_to_line_proceed(open_ordinary_group(TokenGroupKind::Scoped)),
             '[' => add_to_line_proceed(open_ordinary_group(TokenGroupKind::Box (BoxKind::NewObject))),
-            Plus(Compl(Chars "#()[]{}\\;\""|digit|letter_pattern|white_space))
-               => add_single(|x| TokenContents::Symbol (x)),
-            _ => Err(parse_fail("Unexpected character").unwrap_err()) /* Probably not possible? */
+            a if a == case => add_single(|x| TokenContents::Symbol (x)),
+            _ => Err (parse_fail("Unexpected character").unwrap_err()) /* Probably not possible? */
         }
     }
 
@@ -369,18 +398,18 @@ pub fn tokenize(enclosingKind: TokenGroupKind, name: CodeSource, mut buf: String
 }
 
 /* Tokenize entry point typed to channel */
-pub fn tokenize_channel<C: Read>(source: CodeSource, channel: C) -> Result<Token, Error> {
+pub fn tokenize_channel<C: Read>(source: CodeSource, channel: C) -> Result<Token> {
     let lexbuf = Sedlexing.Utf8.from_channel(channel);
     tokenize(TokenGroupKind::Plain, source, lexbuf)
 }
 
 /* Tokenize entry point typed to string */
-pub fn tokenize_string(source: CodeSource, string: String) -> Result<Token, Error> {
+pub fn tokenize_string(source: CodeSource, string: String) -> Result<Token> {
     let lexbuf = Sedlexing.Utf8.from_string(string);
     tokenize(TokenGroupKind::Plain, source, lexbuf)
 }
 
-pub fn unwrap(token: Token) -> Result<CodeSequence, String> {
+pub fn unwrap(token: Token) -> std::result::Result<CodeSequence, String> {
 	match token.contents {
 		TokenContents::Group (g) => Ok (g.items),
 		_ => Err (format!("Internal error: Object in wrong place {}", token.at))

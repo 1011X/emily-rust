@@ -1,9 +1,4 @@
 /* Macro processing */
-#![feature(box_syntax, fnbox)]
-
-#[macro_use]
-extern crate lazy_static;
-
 use std::collections::HashMap;
 use std::sync::{Once, ONCE_INIT};
 
@@ -62,7 +57,7 @@ lazy_static! {
 		let mut hm = HashMap::with_capacity(BUILTIN_MACROS.len());
 		
 		for &(priority, key, spec_function) in &BUILTIN_MACROS {
-			hm.insert(key, MacroSpec {priority, spec_function});
+			hm.insert(key, MacroSpec {priority: priority, spec_function: spec_function});
 		}
 		
 		hm
@@ -601,7 +596,7 @@ lazy_static! {
 		(R(40.), "/", make_splitter("divide")),
 		(R(40.), "*", make_splitter("times")),
 		(R(40.), "%", make_splitter("mod")),
-		(R(50.), "-", make_dual_mode_splitter("negate" "minus")),
+		(R(50.), "-", make_dual_mode_splitter("negate", "minus")),
 		(R(50.), "+", make_splitter("plus")),
 
 		/* Comparators */

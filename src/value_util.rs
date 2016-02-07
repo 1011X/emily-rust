@@ -1,8 +1,4 @@
 /* This file contains support methods for creating values with certain properties, split out from Value for module recursion reasons. */
-#![feature(slice_patterns, advanced_slice_patterns)]
-
-#[macro_use]
-extern crate lazy_static;
 
 use std::collections::HashMap;
 use value::*;
@@ -188,7 +184,7 @@ lazy_static! {
 	pub static ref RETHIS_ASSIGN_OBJECT: Value = snippet_closure(1, |args|
 		match &*args {
 			[a] => raw_rethis_assign_object(a),
-			_ => impossible_arg("RETHIS_ASSIGN_OBJECT");
+			_ => impossible_arg("RETHIS_ASSIGN_OBJECT"),
 		}
 	);
 }
@@ -370,7 +366,7 @@ pub fn populate_let_for_scope(store_in: TableValue, write_to: TableValue) {
 }
 
 /* Give me a simple table of the requested type, prepopulate with basics. */
-pub fn table_blank(kind: TableBlankKind) -> TableType {
+pub fn table_blank(kind: TableBlankKind) -> TableValue {
 	let t = table_true_blank();
 	match kind {
 		TableBlankKind::TrueBlank => {}
@@ -387,9 +383,9 @@ pub fn table_blank(kind: TableBlankKind) -> TableType {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum BoxTarget { Package, Object }
 
-pub enum BoxSpec { Populating(BoxTarget, Value) }
+pub enum BoxSpec { Populating (BoxTarget, Value) }
 
-pub fn box_blank(box_kind: BoxSpec, box_parent: Value) -> TableType {
+pub fn box_blank(box_kind: BoxSpec, box_parent: Value) -> TableValue {
 	let BoxSpec::Populating (target_type, target_value) = box_kind;
     let mut t = table_blank(TableBlankKind::NoLet);
     let mut private_table = table_blank(TableBlankKind::NoLet);
@@ -423,7 +419,7 @@ pub fn box_blank(box_kind: BoxSpec, box_parent: Value) -> TableType {
     t
 }
 
-pub fn table_inheriting(table_kind: TableBlankKind, v: Value) -> TableType {
+pub fn table_inheriting(table_kind: TableBlankKind, v: Value) -> TableValue {
 	let mut t = table_blank(table_kind);
 	t.insert(value::PARENT_KEY.clone(), v);
 	t
@@ -441,7 +437,7 @@ pub fn raw_rethis_transplant(obj: Value) -> Value {
 lazy_static! {
 	pub static ref RETHIS_TRANSPLANT: Value = snippet_closure(1, |args|
 		match &*args {
-			[mut ref obj] => raw_rethis_transplant(obj),
+			[ref mut obj] => raw_rethis_transplant(obj),
 			_ => impossible_arg("RETHIS_TRANSPLANT")
 		}
 	);

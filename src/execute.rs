@@ -10,8 +10,6 @@
     Steps 2, 4 and 5 could potentially require code invocation, necessitating the stack.
  */
 
-#![feature(slice_patterns, advanced_slice_patterns)]
-
 use value::{
 	ExecuteFrame,
 	ExecuteStack,
@@ -477,7 +475,7 @@ pub fn apply(context: ExecuteContext, stack: ExecuteStack, this: Value, a: Value
         /* If applying a closure. */
         Value::Closure (c) => {
             let descend = |c| {
-                let b = c.bound.iter().cloned().rev().collect::<Vec<_>>();
+                let b: Vec<_> = c.bound.iter().cloned().rev().collect();
                 
                 match c.exec {
                     ClosureExec::User (exec) => {

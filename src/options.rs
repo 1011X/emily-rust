@@ -1,9 +1,5 @@
 /* Parse and validate command line arguments. */
 
-#[macro_use]
-extern crate lazy_static;
-extern crate getopts;
-
 use std::env;
 use std::io;
 use std::process;
@@ -44,7 +40,7 @@ pub struct OptionSpec {
 }
 
 lazy_static! {
-	pub static ref mut RUN: OptionSpec = OptionSpec {
+	pub static ref RUN: OptionSpec = OptionSpec {
 		target: None,
 		args: vec![],
 		repl: false,
@@ -226,10 +222,10 @@ Options:";
 	ArgPlus.argParse(args, targetParse, usage, |progArgs|
 		/* Arguments are parsed; either short-circuit with an informational message, or store targets */
 		if RUN.print_machine_version {
-			println!(VERSION);
+			println!("{}", VERSION);
 		}
 		else if RUN.print_version {
-			println!(FULL_VERSION);
+			println!("{}", FULL_VERSION);
 		}
 		else {
 			RUN.args = progArgs;

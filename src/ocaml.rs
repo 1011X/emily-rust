@@ -1,6 +1,7 @@
 #![feature(fnbox)]
 
 pub struct NotFound;
+pub struct EndOfFile;
 pub struct InvalidArgument (String);
 pub struct Failure (String);
 
@@ -17,6 +18,10 @@ mod arg {
 		Help (String),
 		Bad (String),
 	}
+}
+
+mod sys {
+	pub struct Break;
 }
 
 pub fn failwith(s: String) -> Result<(), Failure> {

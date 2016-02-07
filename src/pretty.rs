@@ -3,14 +3,19 @@
 use std::cmp::Ordering;
 
 use token::{
-	TableValue,
+	CodeSequence,
+	Token,
 	TokenContents,
+	TokenGroup,
 	TokenGroupKind,
 };
-
+use options;
+use value;
 use value::{
+	TableValue,
 	Value,
 	ClosureExec,
+	ClosureValue,
 	RegisterState,
 };
 
@@ -93,9 +98,9 @@ pub fn dump_register_state(register_state: &RegisterState) -> String {
     match *register_state {
 		RegisterState::LineStart (ref v, _) =>
 			format!("LineStart:{}", v),
-		RegisterState::FirstValue (ref v, ..) =>
+		RegisterState::FirstValue (ref v, _) =>
 			format!("FirstValue:{}", v),
-		RegisterState::PairValue (ref v1, ref v2, ..) =>
+		RegisterState::PairValue (ref v1, ref v2, _, _) =>
 			format!("PairValue:{},{}", v1, v2),
 	}
 }

@@ -1,9 +1,23 @@
 /* Loads a program and runs it, based on contents of Options. */
+#![feature(box_syntax)]
+#![feature(slice_patterns)]
+#![feature(advanced_slice_patterns)]
+#![feature(box_patterns)]
+
+#[macro_use]
+extern crate lazy_static;
+extern crate regex_syntax;
+extern crate getopts;
+extern crate ctrlc;
+
+mod ocaml;
 
 mod arg_plus;
 mod execute;
+mod internal_package;
 mod macros;
 mod value;
+mod value_util;
 
 mod options;
 mod tokenize;
@@ -14,10 +28,12 @@ mod repl;
 
 use std::fs;
 use std::io;
+use std::process;
 
 use options::ExecutionTarget;
 use token::CodeSource;
 use loader::LoadLocation;
+use tokenize::Error;
 
 fn main() {
     let process_one = |target| {
@@ -66,16 +82,21 @@ fn main() {
 		);
 		
 		match result {
-			Err (EmilyError::CompilationError (e)) |
-			Err (EmilyError::Failure (e)) => {
+			Err (Error::Compilation (e)) => {
 				writeln!(io::stderr(), "{}", e);
-				exit(1);
+				process::exit(1);
+			}
+			
+			Err (Error::Failure (e)) => {
+				writeln!(io::stderr(), "{}", e);
+				process::exit(1);
 			}
 			_ => {}
 		}
 		
         /* In the standalone version, it appears this happens automatically on exit. */
         /* In the C-embed version, it does *not*, so call it here. */
-        flush_all();
+        // TODO: determine how to this would translate
+        //flush_all();
 	}
 }

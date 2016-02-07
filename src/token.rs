@@ -1,6 +1,4 @@
 /* Data representation for an AST. */
-use CodeSource::*;
-use TokenFailureKind::*;
 
 use std::fmt;
 use std::string::ToString;
@@ -19,12 +17,12 @@ pub enum CodeSource {
 impl fmt::Display for CodeSource {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match *self {
-			Stdin => f.write_str("<input>"),
-			Cmdline => f.write_str("<commandline>"),
-			Unknown => f.write_str("<unknown>"),
+			CodeSource::Stdin => f.write_str("<input>"),
+			CodeSource::Cmdline => f.write_str("<commandline>"),
+			CodeSource::Unknown => f.write_str("<unknown>"),
 			
-			Internal (s) => f.write_fmt(format_args!("<internal:{}>", s)),
-			File (ref s) => f.write_fmt(format_args!("'{}'", s)),
+			CodeSource::Internal (s) => f.write_fmt(format_args!("<internal:{}>", s)),
+			CodeSource::File (ref s) => f.write_fmt(format_args!("'{}'", s)),
 		}
 	}
 }

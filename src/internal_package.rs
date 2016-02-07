@@ -1,20 +1,16 @@
-#![feature(slice_patterns)]
-
 use std::sync::{
 	Once,
 	ONCE_INIT
 };
 
-use value;
-use value_util;
-
 use value::{
 	TableBlankKind,
 	Value
 };
-use value_util::TableType;
 
-pub fn table_pair() -> (TableType, Value) {
+use value_util::TableValue;
+
+pub fn table_pair() -> (TableValue, Value) {
 	let table = value_util::table_blank(TableBlankKind::NoSet);
 	let value = Value::Table (table);
 	(table, value)
@@ -28,7 +24,7 @@ pub fn modulus(a: f64, b: f64) -> f64 {
 lazy_static! {
 	pub static ref TRUEFN_VALUE: Value = Value::BuiltinFunction (|x| Value::True);
 	
-	pub static ref INTERNAL_TABLE: TableType = value_util::table_blank(TableBlankKind::NoSet);
+	pub static ref INTERNAL_TABLE: TableValue = value_util::table_blank(TableBlankKind::NoSet);
 	pub static ref INTERNAL_VALUE: Value = Value::Table (INTERNAL_TABLE);
 }
 
@@ -185,12 +181,10 @@ START.call_once(|| {
 	let uchar_to_codepoint = |u| Value::Float (u as f64);
 	let uchar_to_string = |u| {
 		let buffer = String::new();
-		let enc = Uutf.encoder(`UTF_8, `Buffer (buffer));
-		Uutf.encode(enc, `Uchar (u));
-		Uutf.encode(enc, `End);
+		buffer.push(u as char);
 		Value::String (buffer)
 	};
-	let iterator_value = |filter, st| {
+	let iterator_value = |filter| move |st| {
 		let loc = fake_register_location("internal.string.iterUtf8");
 		let decoder = Uutf.decoder(~encoding:`UTF_8, `String(st));
 		Value::BuiltinHandoff (|context, stack, (f, at)| match Uutf.decode(decoder) {
@@ -208,7 +202,7 @@ START.call_once(|| {
 	set_atom_string_op("iterUtf8Codepoint", iterator_value(uchar_to_codepoint));
 
 	set_atom_value(Some (string_table), "codepointToString", value_util::snippet_closure(1, |x| match &*x {
-		[Value::Float (u)] => uchar_to_string(u as i32),
+		[Value::Float (u)] => uchar_to_string(u as u32),
 		_ => failwith "Can only perform that operation on a number"
 	}));
 
