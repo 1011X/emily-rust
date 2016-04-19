@@ -64,22 +64,20 @@ lazy_static! {
 	};
 }
 
-fn key_mutate_argument() -> Vec<(Vec<arg::Key>, arg::Spec, arg::Doc)> {
-	arg_plus::key_mutate(|l| format!("--{}", l.join("-")))
+fn key_mutate_argument(arg: Vec<([&'static str; 2], Spec, String)>) -> Vec<(Vec<arg::Key>, arg::Spec, arg::Doc)> {
+	arg_plus::key_mutate(|l| format!("--{}", l.join("-")), arg)
 }
 
-fn key_mutate_environment() -> Vec<(Vec<arg::Key>, arg::Spec, arg::Doc)> {
-	arg_plus::key_mutate(|l|
-		format!("EMILY_{}", l.iter()
-			.map(|s| s.to_uppercase())
-			.collect::<Vec<_>>()
-			.join("_")
-		)
-	)
+fn key_mutate_environment(arg: Vec<([&'static str; 2], Spec, String)>) -> Vec<(Vec<arg::Key>, arg::Spec, arg::Doc)> {
+	arg_plus::key_mutate(|l| format!("EMILY_{}", l.iter()
+		.map(str::to_uppercase)
+		.collect::<Vec<_>>()
+		.join("_")
+	), arg)
 }
 
 fn build_path_set_spec<F: Fn(String)>(name: [&'static str; 2], action: F, what_is: &'static str) -> ([&'static str; 2], Spec, String) {
-	(name, Spec::String (action), format!("Directory root for packages loaded from \"{}\"", what_is))
+	(name, Spec::String(action), format!("Directory root for packages loaded from \"{}\"", what_is))
 }
 
 
@@ -87,7 +85,7 @@ static START: sync::Once = sync::ONCE_INIT;
 
 pub fn init() {
 START.call_once(|| {
-	let usage = *FULL_VERSION + "
+	let usage = FULL_VERSION.clone() + "
 
 Sample usage:
     emily filename.em     # Execute program
@@ -98,10 +96,8 @@ Sample usage:
 + if cfg!(BUILD_INCLUDE_REPL) { "
     emily -i              # Run in interactive mode (REPL)
     emily -i filename.em  # ...after executing this program"
-} else { "" } + "
-
-Options:";
-	/*
+} else { "" };
+	
 	let mut execute_args = vec![ /* Basic arguments */
 		("-", Arg.Unit(|| { /* Arg's parser means the magic - argument must be passed in this way. */
 			RUN.target = Some(ExecutionTarget::Stdin);
@@ -114,40 +110,10 @@ Options:";
 			Err(ArgPlus.Complete)
 		}), "Execute code inline")
 	];
-	
-	if cfg!(BUILD_INCLUDE_REPL) {
-		execute_args.push(
-			("-i", Arg.Unit(|f| {
-				RUN.repl = true;
-				RUN.dont_need_targets = true;
-			}), "Enter interactive mode (REPL)")
-		);
-	}
-	
-	execute_args.push_all(&[
-
-		("--machine-version", Arg.Unit(|| {
-			RUN.print_machine_version = true;
-		}), "Print interpreter version (number only) and quit")
-	]);
 
 	let environment_args = [ /* "Config" arguments which can be also set with env vars */
 		build_path_set_spec(["package", "path"], |a| RUN.package_path = Some (a), "package"),
 		build_path_set_spec(["project", "path"], |a| RUN.project_path = Some (a), "project")
-	];
-	
-	let debug_args = [ /* For supporting Emily development itself-- separate out to sort last in help */
-		("--debug-dis", Arg.Unit(|| RUN.disassemble = true), "Print \"disassembled\" code and exit"),
-		("--debug-disv", Arg.Unit(|| RUN.disassemble_verbose = true), "Print \"disassembled\" code with position data and exit"),
-		("--debug-macro", Arg.Unit(|| RUN.step_macro = true), "Print results of each individual macro evaluation"),
-		("--debug-trace", Arg.Unit(|| RUN.trace = true), "When executing, print interpreter state"),
-		("--debug-track", Arg.Unit(|| RUN.track_objects = true), "When executing, give all objects a unique \"!id\" member"),
-		("--debug-set", Arg.Unit(|| RUN.trace_set = true), "When executing, print object contents on each set"),
-		("--debug-run", Arg.Unit(|| {
-			RUN.trace = true;
-			RUN.track_objects = true;
-			RUN.trace_set = true;
-		}),  "When executing, set all runtime trace type options")
 	];
 
 	let args = {
@@ -161,26 +127,32 @@ Options:";
 		RUN.target = ExecutionTarget::File (t);
 		Err(ArgPlus.Complete)
 	};
-	*/
+	
 	
 	ArgPlus.envParse(key_mutate_environment(environment_args));
 	
 	
 	
 	
-	/*
-	let mut opts = Options::new();
-	opts.optopt("e", "", "Execute code inline", "<code>");
 	
+	let mut opts = Options::new();
+	
+	// default args
+	opts.optflag("v", "version", "Print interpreter version");
+	opts.optflag("h", "help", "Display this list of options");
+	
+	// execute args
+	opts.optopt("e", "", "Execute code inline", "<code>");
 	if cfg!(BUILD_INCLUDE_REPL) {
 		opts.optflagopt("i", "", "Enter interactive mode (REPL)", "<file>");
 	}
-	
-	opts.optflag("v", "version", "Print interpreter version");
-	opts.optflag("h", "help", "Display this list of options");
 	opts.optflag("", "machine-version", "Print interpreter version (number only) and quit");
+	
+	// environment args
 	//opts.optflag("", "package-path", "Directory root for packages loaded from \"package\"");
 	//opts.optflag("", "project-path", "Directory root for packages loaded from \"project\"");
+	
+	// debug args
 	opts.optflag("", "debug-dis", "Print \"disassembled\" code and exit");
 	opts.optflag("", "debug-disv", "Print \"disassembled\" code with position data and exit");
 	opts.optflag("", "debug-macro", "Print results of each individual macro evaluation");
@@ -188,36 +160,82 @@ Options:";
 	opts.optflag("", "debug-track", "When executing, give all objects a unique \"!id\" member");
 	opts.optflag("", "debug-set", "When executing, print object contents on each set");
 	opts.optflag("", "debug-run", "When executing, set all runtime trace type options");
-	//opts.optflag("", "debug-print-package-path", "Print package loader path and quit");
-    //opts.optflag("", "debug-print-project-path", "Print project loader path and quit");
+	opts.optflag("", "debug-print-package-path", "Print package loader path and quit");
+    opts.optflag("", "debug-print-project-path", "Print project loader path and quit");
 	
 	
-	let arguments: Vec<String> = env::args().collect();
+	let arguments = env::args().skip(1);
 	
-	let matches = match opts.parse(&arguments[1..]) {
-		Ok (m) => m,
-		Err (f) => {
-			writeln!(io::stderr(), "{}", f);
-			writeln!(io::stderr(), "{}", opts.usage(&opts.short_usage(&arguments[0])));
-			process::exit(1);
-		}
+	let matches = match opts.parse(arguments) {
+		Ok(m) => m,
+		Err(f) => panic!("{}\n{}", f, opts.usage(&usage)),
 	};
 	
-	if let Some(arg) = matches.opt_str("e") {
-		RUN.target = Some (ExecutionTarget::Literal (arg));
-	}
-	
-	if cfg!(BUILD_INCLUDE_REPL) {
+	unsafe {
+		if matches.free.contains(&"-".to_string()) {
+			RUN.target = Some(ExecutionTarget::Stdin);
+			//Err(arg_plus::Complete)
+		}
 		
+		if let Some(arg) = matches.opt_str("e") {
+			RUN.target = Some(ExecutionTarget::Literal(arg));
+			//Err(arg_plus::Complete)
+		} else {
+			println!("emily: option '-e' needs an argument.");
+			println!("{}", opts.usage(&usage));
+		}
+	
+		if cfg!(BUILD_INCLUDE_REPL) {
+			if matches.opt_present("i") {
+				RUN.repl = true;
+				RUN.dont_need_targets = true;
+			}
+		}
+		
+		if matches.opt_present("machine-version") {
+			RUN.print_machine_version = true;
+		}
+		
+		if matches.opt_present("debug-dis") {
+			RUN.disassemble = true;
+		}
+		
+		if matches.opt_present("debug-disv") {
+			RUN.disassemble_verbose = true;
+		}
+		
+		if matches.opt_present("debug-macro") {
+			RUN.step_macro = true;
+		}
+		
+		if matches.opt_present("debug-trace") {
+			RUN.trace = true;
+		}
+		
+		if matches.opt_present("debug-track") {
+			RUN.track_objects = true;
+		}
+		
+		if matches.opt_present("debug-set") {
+			RUN.trace_set = true;
+		}
+		
+		if matches.opt_present("debug-run") {
+			RUN.trace = true;
+			RUN.track_objects = true;
+			RUN.trace_set = true;
+		}
+		
+        if matches.opt_present("debug-print-package-path") {
+        	RUN.print_package = true;
+        	RUN.dont_need_targets = true;
+    	}
+    	
+        if matches.opt_present("debug-print-project-path") {
+        	RUN.print_project = true;
+        	RUN.dont_need_targets = true;
+    	}
 	}
-	
-	RUN.
-	
-	if matches.free.contains(&"-".to_string()) {
-		RUN.target = Some(ExecutionTarget::Stdin);
-	}
-	*/
-	
 	
 	
 	
