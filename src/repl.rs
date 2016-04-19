@@ -77,12 +77,12 @@ pub fn repl(target: &'static Option<ExecutionTarget>) {
 
     /* Tokenize and execute the given file target */
     let run_file = |f| {
-        let buf = tokenize::tokenize_channel(CodeSource::File (f), File::open(f).unwrap());
+        let buf = tokenize::tokenize_channel(CodeSource::File(f), File::open(f).unwrap());
         execute::execute(starter, buf);
     };
 
     let run_string = |s| {
-        let buf = tokenize::tokenize_string(CodeSource::Cmdline (s));
+        let buf = tokenize::tokenize_string(CodeSource::Cmdline(s));
         execute::execute(starter, buf);
     };
 
@@ -116,12 +116,12 @@ pub fn repl(target: &'static Option<ExecutionTarget>) {
         /* Attempt to parse the program and return an AST. */
         match tokenize::tokenize_string(CodeSource::Cmdline, combined_string) {
         	/* The program is invalid, but could be valid with more text. Read another line. */
-        	Err (Error::Compilation (TokenFailureKind::IncompleteError, _, _)) =>
+        	Err(Error::Compilation(TokenFailureKind::IncompleteError, _, _)) =>
         		continue,
     		
-    		Err (e) => return Err (e),
+    		Err(e) => return Err(e),
     		
-    		Ok (_) => return Ok (()),
+    		Ok(_) => return Ok(()),
         }
     };
 

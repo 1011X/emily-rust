@@ -8,7 +8,7 @@ use value::{
 	Value
 };
 
-use value_util::TableValue;
+use value::TableValue;
 
 pub fn table_pair() -> (TableValue, Value) {
 	let table = value_util::table_blank(TableBlankKind::NoSet);
@@ -22,15 +22,15 @@ pub fn modulus(a: f64, b: f64) -> f64 {
 }
 
 lazy_static! {
-	pub static ref TRUEFN_VALUE: Value = Value::BuiltinFunction (|x| Value::True);
+	pub static ref TRUEFN_VALUE: Value = Value::BuiltinFunction(box |_| Value::True);
 	
 	pub static ref INTERNAL_TABLE: TableValue = value_util::table_blank(TableBlankKind::NoSet);
-	pub static ref INTERNAL_VALUE: Value = Value::Table (INTERNAL_TABLE);
+	pub static ref INTERNAL_VALUE: Value = Value::Table(INTERNAL_TABLE);
 }
 
 pub fn fake_register_location(name: &'static str) -> CodePosition {
 	CodePosition {
-		file_name: CodeSource::Internal (name),
+		file_name: CodeSource::Internal(name),
 		line_number: 0,
 		line_offset: 0
 	}
@@ -50,8 +50,8 @@ pub fn init() {
 // may seem like we can remove START, but it ensures that the initialization
 // only ever occurs once for this module when calling init().
 START.call_once(|| {
-	let set_atom_value = |table, name, v| table.unwrap_or(INTERNAL_TABLE).insert(Value::Atom(name), v);
-	let set_atom_fn = |table, n, func| set_atom_value(table, n, Value::BuiltinFunction(func));
+	let set_atom_value = |table, name, v| table.unwrap_or(INTERNAL_TABLE).insert(Value::Atom (name), v);
+	let set_atom_fn = |table, n, func| set_atom_value(table, n, Value::BuiltinFunction (func));
 	/* let set_atom_handoff = |table, n, func| set_atom_value(table, n, Value::BuiltinHandoff (func));*/
 	let set_atom_binary = |table, n, func| set_atom_value(table, n, value_util::snippet_closure(2, |x| match &*x {
 		[a, b] => func(a, b),
@@ -85,12 +85,12 @@ START.call_once(|| {
 	set_atom_value(None, "thisUpdate", value_util::RETHIS_SUPER_FROM);
 
 	set_atom_value(None, "setPropertyKey", value_util::snippet_closure(3, |x| match &*x {
-		[Value::Table (mut ref t), k, v] |
-		[Value::Object (mut ref t), k, v] => {
+		[Value::Table (ref mut t), k, v] |
+		[Value::Object (ref mut t), k, v] => {
 			t.insert(k, Value::UserMethod (v));
 			Value::Null
 		}
-		[_, _, _] => failwith "Attempted to call setPropertyKey on something other than an object",
+		[_, _, _] => ocaml::failwith("Attempted to call setPropertyKey on something other than an object"),
 		_ => unreachable!(),
 	}));
 
@@ -127,19 +127,19 @@ START.call_once(|| {
 
 	let set_atom_math = |table, name, f| set_atom_value(Some (table.unwrap_or(double_table)), name, value_util::snippet_closure(2, |x| match &*x {
 		[Value::Float (f1), Value::Float (f2)] => Value::Float (f(f1, f2)),
-		[Value::Float (_), _] => failwith "Don't know how to combine that with a number",
+		[Value::Float (_), _] => ocaml::failwith("Don't know how to combine that with a number"),
 		_ => unreachable!(),
 	}));
 
 	let set_atom_test = |table, name, f| set_atom_value(Some (table.unwrap_or(double_table)), name, value_util::snippet_closure(2, |x| match &*x {
 		[Value::Float (f1), Value::Float (f2)] => value_util::bool_cast(f(f1, f2)),
-		[Value::Float (_), _] => failwith "Don't know how to compare that to a number",
+		[Value::Float (_), _] => ocaml::failwith("Don't know how to compare that to a number"),
 		_ => unreachable!(),
 	}));
 
 	let set_atom_math_fn = |table, name, f| set_atom_fn(Some (table.unwrap_or(double_table)), name, |x| match x {
 		Value::Float (f1) => Value::Float (f(f1)),
-		_ => failwith "Can only perform that function on a number"
+		_ => ocaml::failwith("Can only perform that function on a number")
 	});
 
 	set_atom_math(None, "add", |a, b| a + b);
@@ -158,7 +158,7 @@ START.call_once(|| {
 
 	set_atom_fn(Some (double_table), "toString", |x| match x {
 		Value::Float (f1) => Value::String (f1.to_string()),
-		_ => failwith "Can only perform that function on a number"
+		_ => ocaml::failwith("Can only perform that function on a number")
 	});
 
 	/* "Submodule" internal.string */
@@ -166,7 +166,7 @@ START.call_once(|| {
 
 	set_atom_fn(Some (atom_table), "toString", |x| match x {
 		Value::Atom (s) => Value::String (s),
-		_ => failwith "Can only perform that function on an atom"
+		_ => ocaml::failwith("Can only perform that function on an atom")
 	});
 
 	/* "Submodule" internal.string */
@@ -175,7 +175,7 @@ START.call_once(|| {
 	/* Note: Does NOT coerce into a type, f is of type f -> value */
 	let set_atom_string_op = |table, name, f| set_atom_value(Some (table.unwrap_or(string_table)), name, value_util::snippet_closure(1, |x| match &*x {
 		[Value::String (f1)] => f(f1),
-		_ => failwith "Can only perform that operation on a string"
+		_ => ocaml::failwith("Can only perform that operation on a string")
 	}));
 
 	let uchar_to_codepoint = |u| Value::Float (u as f64);
@@ -184,40 +184,41 @@ START.call_once(|| {
 		buffer.push(u as char);
 		Value::String (buffer)
 	};
-	let iterator_value = |filter| move |st| {
+	
+	// takes an function "filter", and a char/string(?) "st"
+	let iterator_value = |filter| box |st| {
 		let loc = fake_register_location("internal.string.iterUtf8");
-		let decoder = Uutf.decoder(~encoding:`UTF_8, `String(st));
-		Value::BuiltinHandoff (|context, stack, (f, at)| match Uutf.decode(decoder) {
-			`Uchar (u) => {
+		Value::BuiltinHandoff (box |context, stack, (f, at)| match st.chars().nth(0) {
+			Some (u) => {
 				let result = filter(u);
 				let mut v = stack.clone();
-				v.push(fake_register_from(Value::First (TRUEFN_VALUE, loc, loc));
-				v.push(fake_register_from(Value::Pair (f, result, loc, loc)));
+				v.push(fake_register_from(RegisterState::FirstValue (TRUEFN_VALUE, loc, loc.clone())));
+				v.push(fake_register_from(RegisterState::PairValue (f, result, loc, loc.clone())));
 				execute::execute_step(context, v)
 			}
 			_ => execute::return_to(context, stack, (Value::Null, loc))
 		})
 	};
-	set_atom_string_op("iterUtf8", iterator_value(uchar_to_string));
-	set_atom_string_op("iterUtf8Codepoint", iterator_value(uchar_to_codepoint));
-
+	set_atom_string_op(None, "iterUtf8", iterator_value(uchar_to_string));
+	set_atom_string_op(None, "iterUtf8Codepoint", iterator_value(uchar_to_codepoint));
+	
 	set_atom_value(Some (string_table), "codepointToString", value_util::snippet_closure(1, |x| match &*x {
 		[Value::Float (u)] => uchar_to_string(u as u32),
-		_ => failwith "Can only perform that operation on a number"
+		_ => ocaml::failwith("Can only perform that operation on a number")
 	}));
 
 	set_atom_value(Some (string_table), "concat", value_util::snippet_closure(2, |x| match &*x {
 		[Value::String (f1), Value::String (f2)] => Value::String (format!("{}{}", f1, f2)),
-		[Value::String (_), _] => failwith "Don't know how to combine that with a string",
+		[Value::String (_), _] => ocaml::failwith("Don't know how to combine that with a string"),
 		_ => unreachable!(),
 	}));
 
 	/* "Submodule" internal.type */
 	let type_table = insert_table(None, "type");
 
-	set_atom_fn(Some (type_table), "isAtom", |v| match v { Value::Atom (_) => Value::True, _ => Value::Null});
-	set_atom_fn(Some (type_table), "isString", |v| match v { Value::String (_) => Value::True, _ => Value::Null});
-	set_atom_fn(Some (type_table), "isNumber", |v| match v { Value::Float (_) => Value::True, _ => Value::Null});
+	set_atom_fn(Some(type_table), "isAtom", |v| match v { Value::Atom(_) => Value::True, _ => Value::Null});
+	set_atom_fn(Some(type_table), "isString", |v| match v { Value::String(_) => Value::True, _ => Value::Null});
+	set_atom_fn(Some(type_table), "isNumber", |v| match v { Value::Float(_) => Value::True, _ => Value::Null});
 
 	/* "Submodule" internal.type */
 	
@@ -226,12 +227,19 @@ START.call_once(|| {
 		let ffi_table = insert_table(None, "ffi");
 		
 		set_atom_fn(Some (ffi_table), "newForeign", |_| {
-			let foreigner = {name=None; args=[]; returning="void"};
+			let foreigner = ForeignWrap {
+				name: None,
+				args: vec![],
+				returning: "void".to_string()
+			};
 			let table = value_util::table_blank(TableBlankKind::NoSet);
-			let set_ffi_param = |what, func| table.insert(Value::Atom (what), Value::BuiltinFunction (|a| match a {
+			let set_ffi_param = |what, func| table.insert(Value::Atom (what), Value::BuiltinFunction (box |a| match a {
 				Value::Atom (s) |
-				Value::String (s) => { func(s); Value::Null }
-				x => failwith @@ format!("Need key {} for ffi {}; expected string or atom", x, what),
+				Value::String (s) => {
+					func(s);
+					Value::Null
+				}
+				x => ocaml::failwith(&format!("Need key {} for ffi {}; expected string or atom", x, what)),
 			}));
 			set_ffi_param("name", |s| foreigner.name = Some (s));
 			set_ffi_param("return", |s| foreigner.returning = s);
@@ -240,11 +248,11 @@ START.call_once(|| {
 				t.push(s);
 				t
 			});
-			table.insert(Value::Atom ("make".to_string()), Value::BuiltinFunction (|_|
+			table.insert(Value::Atom ("make".to_string()), Value::BuiltinFunction (box |_|
 				match foreigner.name {
-					None => failwith "No name provided for FFI function",
+					None => ocaml::failwith("No name provided for FFI function"),
 					Some (name) =>
-						value_foreign(name, foreigner.args.clone().reverse(), foreigner.returning)
+						value_foreign(name, foreigner.args.iter().rev().cloned().collect(), foreigner.returning)
 				}
 			));
 			Value::Table (table)

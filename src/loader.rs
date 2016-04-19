@@ -76,8 +76,8 @@ pub fn self_filter(this: Value, source: LoaderSource) -> LoaderSource {
 pub fn known_filter(source: LoaderSource) -> Option<Value> {
 	match source {
 		LoaderSource::NoSource => None,
-		LoaderSource::Source (x) => Some (x),
-		_ => ocaml::failwith("Internal error: Package loader attempted to load a file as if it were a directory".to_string()),
+		LoaderSource::Source(x) => Some(x),
+		_ => ocaml::failwith("Internal error: Package loader attempted to load a file as if it were a directory"),
 	}
 }
 /* There is one "base" starter plus one substarter for each file executed.
@@ -131,7 +131,8 @@ lazy_static! {
 /* FIXME: Couldn't kind be NewScope and the starter impose the box? */
 pub fn load_file(starter: ExecuteStarter, project_source: LoaderSource, directory: LoaderSource, path: String) -> Value {
     /* FIXME: What if known_filter is NoSource here? This is the "file where expected a directory" case. */
-    let buf = tokenize::tokenize_channel(CodeSource::File (path), fs::File::open(path));
+    let buf = tokenize::tokenize_channel(CodeSource::File(path), fs::File::open(path));
+    
     execute_package(starter, known_filter(project_source), known_filter(directory), buf)
 }
 

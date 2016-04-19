@@ -2,6 +2,7 @@
 
 use std::env;
 use std::io;
+use std::path;
 use std::process;
 use std::sync;
 
@@ -13,8 +14,8 @@ lazy_static! {
 
 pub enum ExecutionTarget {
 	Stdin,
-	File (String),
-	Literal (String)
+	File(PathBuf),
+	Literal(String)
 }
 
 pub struct OptionSpec {
@@ -106,7 +107,7 @@ Options:";
 
 		/* Args */
 		("-e", Arg.String(|f| {
-			RUN.target = Some(ExecutionTarget::Literal (f));
+			RUN.target = Some(ExecutionTarget::Literal(f));
 			Err(ArgPlus.Complete)
 		}), "Execute code inline")
 	];

@@ -167,35 +167,35 @@ pub fn tokenize(enclosingKind: TokenGroupKind, name: CodeSource, mut buf: String
             loop {
 		        match chars.next() {
 		            /* Treat a newline like any other char, but since sedlex doesn't track lines, we have to record it */
-		            Some ('\n') => {
+		            Some('\n') => {
 		                state_newline();
 		                add_buf();
 		            }
 		            
 		            /* Backslash found, trigger escape handler */
-		            Some ('\\') => {
+		            Some('\\') => {
 		            	// FIXME: handle unwrap() below.
 		            	let result = escaped_char(chars.next().unwrap());
 		            	
 		            	match result {
-		            		Ok (s) => accum.push_str(s),
-		            		Err (e) => return Err (e),
+		            		Ok(s) => accum.push_str(s),
+		            		Err(e) => return Err(e),
 	            		}
 	            	}
 		            
 		            /* Unescaped quote found, we are done. Return the data from the buffer. */
-		            Some ('"') => break,
+		            Some('"') => break,
 		            
 		            /* User probably did not intend for string to run to EOF. */
 		            None =>
-		            	Err (incomplete_fail("Reached end of file inside string. Missing quote?").unwrap_err()),
+		            	Err(incomplete_fail("Reached end of file inside string. Missing quote?").unwrap_err()),
 		            
 		            /* Any normal character add to the buffer and proceed. */
-		            Some (_) => add_buf(),
+		            Some(_) => add_buf(),
 		        }
 	        }
 	        
-	        Ok (accum)
+	        Ok(accum)
         };
         
         proceed()
@@ -357,23 +357,23 @@ pub fn tokenize(enclosingKind: TokenGroupKind, name: CodeSource, mut buf: String
             }
 
             /* Quoted string */
-            '"' => add_to_line_proceed(make_token_here(TokenContents::String (match quoted_string() {
-        		Ok (a) => a,
-        		Err (e) => return Err (e)
-    		}))),
+            '"' => add_to_line_proceed(make_token_here(TokenContents::String(Cow::Owned(try!(quoted_string()))))),
 
             /* Floating point number */
             // TODO: handle .unwrap() below
-            float_pattern => add_single(|x| TokenContents::Number (x.parse::<f64>().unwrap())),
+            float_pattern => add_single(|x| TokenContents::Number(x.parse::<f64>().unwrap())),
 
             /* Local scope variable */
-            word_pattern => add_single(|x| TokenContents::Word (x)),
+            word_pattern => add_single(TokenContents::Word),
 
             /* Line demarcator */
             ';' => new_line_proceed(),
 
             /* Line demarcator (but remember, we have to track newlines) */
-            '\n' => { state_newline(); new_line_proceed() }
+            '\n' => {
+            	state_newline();
+            	new_line_proceed()
+        	}
 
             /* Reader instructions.
                TODO: A more general system for reader instructions; allow tab after \version */
@@ -388,8 +388,8 @@ pub fn tokenize(enclosingKind: TokenGroupKind, name: CodeSource, mut buf: String
             '(' => add_to_line_proceed(open_ordinary_group(TokenGroupKind::Plain)),
             '{' => add_to_line_proceed(open_ordinary_group(TokenGroupKind::Scoped)),
             '[' => add_to_line_proceed(open_ordinary_group(TokenGroupKind::Box (BoxKind::NewObject))),
-            a if a == case => add_single(|x| TokenContents::Symbol (x)),
-            _ => Err (parse_fail("Unexpected character").unwrap_err()) /* Probably not possible? */
+            a if a == case => add_single(|x| TokenContents::Symbol(x)),
+            _ => Err(parse_fail("Unexpected character").unwrap_err()) /* Probably not possible? */
         }
     }
 
@@ -400,25 +400,27 @@ pub fn tokenize(enclosingKind: TokenGroupKind, name: CodeSource, mut buf: String
 /* Tokenize entry point typed to channel */
 pub fn tokenize_channel<C: Read>(source: CodeSource, channel: C) -> Result<Token> {
     let lexbuf = Sedlexing.Utf8.from_channel(channel);
+    
     tokenize(TokenGroupKind::Plain, source, lexbuf)
 }
 
 /* Tokenize entry point typed to string */
 pub fn tokenize_string(source: CodeSource, string: String) -> Result<Token> {
     let lexbuf = Sedlexing.Utf8.from_string(string);
+    
     tokenize(TokenGroupKind::Plain, source, lexbuf)
 }
 
 pub fn unwrap(token: Token) -> std::result::Result<CodeSequence, String> {
 	match token.contents {
-		TokenContents::Group (g) => Ok (g.items),
-		_ => Err (format!("Internal error: Object in wrong place {}", token.at))
+		TokenContents::Group(g) => Ok(g.items),
+		_ => Err(format!("Internal error: Object in wrong place {}", token.at))
 	}
 }
 
 pub fn snippet(source: CodeSource, st: String) -> Result<CodeSequence, String> {
     match tokenize_string(source, st) {
-        Ok (v) => unwrap(v),       
-        Err (e) => Err(format!("Internal error: Interpreter-internal code is invalid: {}", e)),
+        Ok(v) => unwrap(v),       
+        Err(e) => Err(format!("Internal error: Interpreter-internal code is invalid: {}", e)),
     }
 }

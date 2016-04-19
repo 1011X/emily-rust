@@ -6,7 +6,7 @@ use token::*;
 
 /* Misc failure throw methods */
 pub fn bad_arg(desired: &'static str, name: &'static str, var: &Value) -> Result<(), String> {
-	Err (format!("Bad argument to {}: Need {}, got {}", name, desired, pretty::dump_value(var)))
+	Err(format!("Bad argument to {}: Need {}, got {}", name, desired, pretty::dump_value(var)))
 }
 
 pub fn bad_arg_table(name: &'static str, var: &Value) -> Result<(), String> {
@@ -18,7 +18,7 @@ pub fn bad_arg_closure(name: &'static str, var: &Value) -> Result<(), String> {
 }
 
 pub fn impossible_arg(name: &'static str) -> Result<(), String> {
-	Err (format!("Internal failure: Impossible argument to {}", name))
+	Err(format!("Internal failure: Impossible argument to {}", name))
 }
 
 
@@ -27,7 +27,7 @@ pub fn misapply_string(a: &Value, b: &Value) -> String {
 }
 
 pub fn raw_misapply_arg(a: &Value, b: &Value) -> Result<(), String> {
-	Err (misapply_string(a, b))
+	Err(misapply_string(a, b))
 }
 
 /* Tools */
@@ -130,7 +130,7 @@ lazy_static! {
 	/* ...used to define the ternary function with short-circuiting: */
 	/* This is used by snippets that require tern, but tern in scope_prototype is separate. */
 	pub static ref TERN: Value = snippet_text_closure(
-		CodeSource::Internal ("TERN"),
+		CodeSource::Internal("TERN"),
 		vec![
 			("rawTern", RAW_TERN),
 			("null", Value::Null)
@@ -228,7 +228,7 @@ lazy_static! {
 
 	/* A curried one which knows how to check the super class: */
 	pub static ref HAS_CONSTRUCT: Value = snippet_text_closure(
-		CodeSource::Internal ("HAS_CONSTRUCT"),
+		CodeSource::Internal("HAS_CONSTRUCT"),
 		vec![
 			("rawHas", RAW_HAS),
 			("tern", TERN),
@@ -261,7 +261,7 @@ lazy_static! {
 
 	/* ...And a factory for a curried one that knows how to check the super class: */
 	pub static ref SET_CONSTRUCT: Value = snippet_text_closure(
-		CodeSource::Internal ("SET_CONSTRUCT"),
+		CodeSource::Internal("SET_CONSTRUCT"),
 		vec![
 			("rawHas", RAW_HAS),
 			("rawSet", RAW_SET),
@@ -284,7 +284,7 @@ lazy_static! {
 /* Same thing, but for a Value::Object instead of a Value::Table.
    The difference lies in how "this" is treated */
 	pub static ref OBJECT_SET_CONSTRUCT: Value = snippet_text_closure(
-		CodeSource::Internal ("OBJECT_SET_CONSTRUCT"),
+		CodeSource::Internal("OBJECT_SET_CONSTRUCT"),
 		vec![
 			("rawHas", RAW_HAS),
 			("rawSet", RAW_SET),
@@ -472,7 +472,7 @@ lazy_static! {
 
 	/* Factory for super functions */
 	pub static ref SUPER_CONSTRUCT: Value = snippet_text_closure(
-		CodeSource::Internal ("SUPER_CONSTRUCT"),
+		CodeSource::Internal("SUPER_CONSTRUCT"),
 		vec![
 			("rethis", RETHIS_SUPER_FROM),
 			("rawHas", RAW_HAS),

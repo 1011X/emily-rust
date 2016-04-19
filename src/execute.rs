@@ -129,7 +129,7 @@ apply: (A pair of values has been identified; evaluate their application.)
 */
 
 /* These first five functions are mostly routing: */
-/* executeStep is the "start of the loop"-- the entry point we return to after each action.
+/* execute_step is the "start of the loop"-- the entry point we return to after each action.
    it currently just unpacks the stack, cleans it up, and passes components on to process. */
 pub fn execute_step(context: ExecuteContext, stack: ExecuteStack) -> Value {
     match &*stack {
@@ -208,7 +208,7 @@ pub fn execute_step_with_frames(context: ExecuteContext, stack: ExecuteStack, fr
 			if options::RUN.track_objects {
 				format!(" | Scope {}", frame.scope)
 			} else {
-				"".to_string()
+				"".to_owned()
 			},
 			dump_register_state(frame.register),
 			pretty::dump_code_tree_terse(
@@ -380,13 +380,13 @@ pub fn evaluate_token_from_tokens(context: ExecuteContext, stack: ExecuteStack, 
                     let new_scope = group_scope(context, group.kind, frame.scope, with_initializer_value);
                     let items = match group.kind {
                         TokenGroupKind::Box (_) => {
-                            let wrapper_group = token::clone(token, &TokenContents::Group (TokenGroup {
+                            let wrapper_group = token::clone(token, &TokenContents::Group(TokenGroup {
                             	kind: TokenGroupKind::Plain,
                             	closure: TokenGroupKind::NonClosure,
                             	group_initializer: vec![],
                             	items: group.items,
                             }));
-                            let word = clone(token, TokenContents::Word (value::CURRENT_KEY_STRING));
+                            let word = clone(token, TokenContents::Word(Cow::Borrowed(value::CURRENT_KEY_STRING)));
                             vec![vec![wrapper_group], vec![word]]
                         }
                         _ => group.items,
@@ -557,26 +557,26 @@ pub fn apply(context: ExecuteContext, stack: ExecuteStack, this: Value, a: Value
             return_to(context, stack, b),
 
         /* If applying a table or table op. */
-        Value::Object (t) | Value::Table (t) => read_table(t),
+        Value::Object(t) | Value::Table(t) => read_table(t),
         
         /* If applying a primitive value. */
         Value::Null =>       apply(context, stack, a, null_proto, b),
         Value::True =>       apply(context, stack, a, true_proto, b),
-        Value::Float (v) =>  apply(context, stack, a, float_proto, b),
-        Value::String (v) => apply(context, stack, a, string_proto, b),
-        Value::Atom (v) =>   apply(context, stack, a, atom_proto, b),
+        Value::Float(v) =>   apply(context, stack, a, float_proto, b),
+        Value::String(v) =>  apply(context, stack, a, string_proto, b),
+        Value::Atom(v) =>    apply(context, stack, a, atom_proto, b),
         
         /* If applying a builtin special. */
-        Value::BuiltinFunction (f) => r(match f(bv) {
+        Value::BuiltinFunction(f) => r(match f(bv) {
             Err(ocaml::Failure (e)) =>
             	fail_with_stack(stack, format!("Runtime error, applying builtin function to {}: {}", bv, e)),
             Err(e) => return Err(e),
             Ok(v) => v,
         }),
-        Value::BuiltinHandoff (f) => /* Note: No this included, so not for methods */
+        Value::BuiltinHandoff(f) => /* Note: No this included, so not for methods */
             f(context, stack, b),
         /* Unworkable -- all builtin method values should be erased by readTable */
-        Value::BuiltinMethod (_) | Value::BuiltinUnaryMethod (_) | Value::UserMethod (_) =>
+        Value::BuiltinMethod(_) | Value::BuiltinUnaryMethod(_) | Value::UserMethod(_) =>
         	unreachable!(),
     }
 }

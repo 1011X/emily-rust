@@ -2,21 +2,21 @@
 
 pub struct NotFound;
 pub struct EndOfFile;
-pub struct InvalidArgument (String);
-pub struct Failure (String);
+pub struct InvalidArgument(String);
+pub struct Failure(String);
 
 mod arg {
 	pub type Key = String;
 	pub type Doc = String;
 	
 	pub enum Spec {
-		Unit (Box<FnBox()>),
-		String (Box<FnBox(String)>),
+		Unit(Box<FnBox()>),
+		String(Box<FnBox(String)>),
 	}
 	
 	pub enum Error {
-		Help (String),
-		Bad (String),
+		Help(String),
+		Bad(String),
 	}
 }
 
@@ -24,6 +24,6 @@ mod sys {
 	pub struct Break;
 }
 
-pub fn failwith(s: String) -> Result<(), Failure> {
-	Err (Failure (s.clone()))
+pub fn failwith(s: &str) -> Result<(), Failure> {
+	Err(Failure(s.to_owned()))
 }
