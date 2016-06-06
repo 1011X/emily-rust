@@ -1,10 +1,8 @@
 /* Data representation for a runtime value. */
 
-#[macro_use]
-extern crate lazy_static;
-
 use std::collections::HashMap;
 use std::hash::Hasher;
+use std::borrow::Cow;
 
 pub type TableValue = HashMap<Value, Value>;
 
@@ -21,16 +19,16 @@ pub struct ClosureExecUser {
 
 #[derive(Clone)]
 pub enum ClosureExec {
-	User (ClosureExecUser),
-	Builtin (Box<Fn(Vec<Value>) -> Value>)
+	User(ClosureExecUser),
+	Builtin(Box<Fn(Vec<Value>) -> Value>)
 }
 
 #[derive(Clone)]
 pub enum ClosureThis {
 	Blank,                  /* Newly born closure */
 	Never,                  /* Closure is not a method and should not receive a this. */
-	Current (Value, Value), /* Closure is a method, has a provisional current/this. */
-	Frozen (Value, Value),  /* Closure is a method, has a final, assigned current/this. */
+	Current(Value, Value),  /* Closure is a method, has a provisional current/this. */
+	Frozen(Value, Value),   /* Closure is a method, has a final, assigned current/this. */
 }
 
 pub struct ClosureValue {
@@ -41,13 +39,13 @@ pub struct ClosureValue {
 }
 
 #[derive(Eq)]
-pub enum Value {
+pub enum Value<'a> {
     /* "Primitive" values */
 	Null,
 	True,
-	Float (f64),
-	String (String),
-	Atom (String),
+	Float(f64),
+	String(String),
+	Atom(Cow<'a, str>),
 
 	/* Hack types for builtins */ /* FIXME: Can some of these be deprecated? */
 	BuiltinFunction            (Box<Fn(Value) -> Value>), /* function argument = result */
@@ -61,11 +59,11 @@ pub enum Value {
 	
 	// XXX Note to self: STOP TRYING TO INTEGRATE ClosureValue INTO Value!!!
 	// It's more convenient if you just... don't.
-	Closure (ClosureValue),
-	UserMethod (Box<Value>),
-	Table (TableValue),
-	Object (TableValue), /* Same as Value::Table but treats 'this' different */
-	Continuation (ExecuteStack, token::CodePosition), /* CodePosition only needed for traceback */
+	Closure(ClosureValue),
+	UserMethod(Box<Value>),
+	Table(TableValue),
+	Object(TableValue), /* Same as Value::Table but treats 'this' different */
+	Continuation(ExecuteStack, token::CodePosition), /* CodePosition only needed for traceback */
 }
 
 // Used for implementing OCaml's equality rules
@@ -75,6 +73,7 @@ impl PartialEq for Value {
 		match (self, other) {
 			(&Value::Null, &Value::Null) |
 			(&Value::True, &Value::True) => true,
+			
 			_ => self as *const Value == other as *const Value,
 		}
 	}
@@ -96,12 +95,12 @@ impl Clone for Value {
 // implementation will have a String object already allocated, so we can just use that.
 impl ToString for Value {
 	fn to_string(&self) -> String {
-		let wrapper: fn(String, &Value) -> String = if options::RUN.track_objects {
-			pretty::label_wrapper
-		} else {
-			pretty::simple_wrapper
-		};
-		pretty::dump_value_tree_general(wrapper, v)
+		if options::RUN.track_objects {
+			pretty::dump_value_tree_general(pretty::label_wrapper, v)
+		}
+		else {
+			pretty::dump_value_tree_general(pretty::simple_wrapper, v)
+		}
 	}
 }
 
@@ -114,9 +113,9 @@ impl Display for Value {
 /* The "registers" are values 1 and 2 described in execute.rs comments */
 /* The CodePositions are (1) the root of the current group (2) the symbol yielding "value 2" */
 pub enum RegisterState {
-	LineStart (Value, token::CodePosition),
-	FirstValue (Value, token::CodePosition, token::CodePosition),
-	PairValue (Value, Value, token::CodePosition, token::CodePosition)
+	LineStart(Value, token::CodePosition),
+	FirstValue(Value, token::CodePosition, token::CodePosition),
+	PairValue(Value, Value, token::CodePosition, token::CodePosition)
 }
 
 /* Each frame on the stack has the two value "registers" and a codeSequence reference which
@@ -149,8 +148,8 @@ pub enum TableBlankKind {
 
 /* For making a scope inside an object literal */
 pub enum TableBoxKind {
-	BoxNew (token::BoxKind),
-	BoxValue (Value),
+	BoxNew(token::BoxKind),
+	BoxValue(Value),
 }
 
 pub struct ExecuteStarter {
@@ -178,24 +177,22 @@ pub static NONLOCAL_KEY_STRING   : &'static str = "nonlocal";
 pub static PRIVATE_KEY_STRING    : &'static str = "private";
 pub static EXPORT_LET_KEY_STRING : &'static str = "exportLet";
 
-lazy_static! {
-	pub static ref HAS_KEY        : Value = Value::Atom (HAS_KEY_STRING.to_string());
-	pub static ref SET_KEY        : Value = Value::Atom (SET_KEY_STRING.to_string());
-	pub static ref LET_KEY        : Value = Value::Atom (LET_KEY_STRING.to_string());
-	pub static ref PARENT_KEY     : Value = Value::Atom (PARENT_KEY_STRING.to_string());
-	pub static ref ID_KEY         : Value = Value::Atom (ID_KEY_STRING.to_string());
-	pub static ref CURRENT_KEY    : Value = Value::Atom (CURRENT_KEY_STRING.to_string());
-	pub static ref THIS_KEY       : Value = Value::Atom (THIS_KEY_STRING.to_string());
-	pub static ref SUPER_KEY      : Value = Value::Atom (SUPER_KEY_STRING.to_string());
-	pub static ref RETURN_KEY     : Value = Value::Atom (RETURN_KEY_STRING.to_string());
-	pub static ref PACKAGE_KEY    : Value = Value::Atom (PACKAGE_KEY_STRING.to_string());
-	pub static ref PROJECT_KEY    : Value = Value::Atom (PROJECT_KEY_STRING.to_string());
-	pub static ref DIRECTORY_KEY  : Value = Value::Atom (DIRECTORY_KEY_STRING.to_string());
-	pub static ref INTERNAL_KEY   : Value = Value::Atom (INTERNAL_KEY_STRING.to_string());
-	pub static ref NONLOCAL_KEY   : Value = Value::Atom (NONLOCAL_KEY_STRING.to_string());
-	pub static ref PRIVATE_KEY    : Value = Value::Atom (PRIVATE_KEY_STRING.to_string());
-	pub static ref EXPORT_LET_KEY : Value = Value::Atom (EXPORT_LET_KEY_STRING.to_string());
-}
+pub static HAS_KEY        : Value = Value::Atom(Cow::Borrowed(HAS_KEY_STRING));
+pub static SET_KEY        : Value = Value::Atom(Cow::Borrowed(SET_KEY_STRING));
+pub static LET_KEY        : Value = Value::Atom(Cow::Borrowed(LET_KEY_STRING));
+pub static PARENT_KEY     : Value = Value::Atom(Cow::Borrowed(PARENT_KEY_STRING));
+pub static ID_KEY         : Value = Value::Atom(Cow::Borrowed(ID_KEY_STRING));
+pub static CURRENT_KEY    : Value = Value::Atom(Cow::Borrowed(CURRENT_KEY_STRING));
+pub static THIS_KEY       : Value = Value::Atom(Cow::Borrowed(THIS_KEY_STRING));
+pub static SUPER_KEY      : Value = Value::Atom(Cow::Borrowed(SUPER_KEY_STRING));
+pub static RETURN_KEY     : Value = Value::Atom(Cow::Borrowed(RETURN_KEY_STRING));
+pub static PACKAGE_KEY    : Value = Value::Atom(Cow::Borrowed(PACKAGE_KEY_STRING));
+pub static PROJECT_KEY    : Value = Value::Atom(Cow::Borrowed(PROJECT_KEY_STRING));
+pub static DIRECTORY_KEY  : Value = Value::Atom(Cow::Borrowed(DIRECTORY_KEY_STRING));
+pub static INTERNAL_KEY   : Value = Value::Atom(Cow::Borrowed(INTERNAL_KEY_STRING));
+pub static NONLOCAL_KEY   : Value = Value::Atom(Cow::Borrowed(NONLOCAL_KEY_STRING));
+pub static PRIVATE_KEY    : Value = Value::Atom(Cow::Borrowed(PRIVATE_KEY_STRING));
+pub static EXPORT_LET_KEY : Value = Value::Atom(Cow::Borrowed(EXPORT_LET_KEY_STRING));
 
 // Really needed?
 pub fn table_set_option(table: &mut TableValue, key: Value, value: Option<Value>) {
@@ -206,8 +203,9 @@ pub fn table_set_option(table: &mut TableValue, key: Value, value: Option<Value>
 
 pub fn table_from(value: Value) -> Result<TableValue, ocaml::Failure> {
 	match value {
-		Value::Table (v) |
-		Value::Object (v) => Ok (v),
-		_ => Err (ocaml::Failure ("Internal error-- interpreter accidentally treated a non-object as an object in a place this should have been impossible.".to_string()))
+		Value::Table(v) |
+		Value::Object(v) => Ok(v),
+		
+		_ => Err(ocaml::Failure("Internal error-- interpreter accidentally treated a non-object as an object in a place this should have been impossible.".to_string()))
 	}
 }

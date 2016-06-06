@@ -3,14 +3,19 @@
 use std::cmp::Ordering;
 
 use token::{
-	TableValue,
+	CodeSequence,
+	Token,
 	TokenContents,
+	TokenGroup,
 	TokenGroupKind,
 };
-
+use options;
+use value;
 use value::{
+	TableValue,
 	Value,
 	ClosureExec,
+	ClosureValue,
 	RegisterState,
 };
 
@@ -93,9 +98,11 @@ pub fn dump_register_state(register_state: &RegisterState) -> String {
     match *register_state {
 		RegisterState::LineStart (ref v, _) =>
 			format!("LineStart:{}", v),
-		RegisterState::FirstValue (ref v, ..) =>
+		
+		RegisterState::FirstValue (ref v, _) =>
 			format!("FirstValue:{}", v),
-		RegisterState::PairValue (ref v1, ref v2, ..) =>
+		
+		RegisterState::PairValue (ref v1, ref v2, _, _) =>
 			format!("PairValue:{},{}", v1, v2),
 	}
 }
@@ -105,7 +112,9 @@ pub fn dump_register_state(register_state: &RegisterState) -> String {
 /* Re-escape string according to the Emily reader's rules */
 pub fn escape_string(s: &str) -> String {
     let mut sb = String::with_capacity(s.len() + 2);
+    
     sb.push('"');
+    
     for c in s.chars() {
     	match c {
 		    '"' | '\\' => {
@@ -116,7 +125,9 @@ pub fn escape_string(s: &str) -> String {
 		    c => sb.push(c),
 		}
     }
+    
     sb.push('"');
+    
     sb
 }
 
@@ -126,40 +137,44 @@ pub fn angle_wrap(s: &str) -> String {
 
 pub fn id_string_for_table(t: &TableValue) -> String {
     match t.get(value::ID_KEY) {
-        None => "UNKNOWN".to_string(),
-        Some (&Value::Float (v)) => (v as i32).to_string(),
-        _ => "INVALID".to_string() /* Should be impossible */
+        None => "UNKNOWN".to_owned(),
+        
+        Some(&Value::Float(v)) => (v as i32).to_string(),
+        
+        _ => "INVALID".to_owned() /* Should be impossible */
     }
 }
 
 pub fn id_string_for_value(v: &Value) -> String {
 	match *v {
-		Value::Table (ref t) | Value::Object (ref t) =>
+		Value::Table(ref t) | Value::Object(ref t) =>
 			id_string_for_table(t),
+		
 		_ => "UNTABLE".to_string(),
 	}
 }
 
 pub fn dump_value_tree_general(wrapper: fn(&str, &Value) -> String, v: &Value) -> String {
     match *v {
-        Value::Null => "<null>".to_string(),
-        Value::True => "<true>".to_string(),
-        Value::Float (v) => v.to_string(),
-        Value::String (s) => escape_string(s),
-        Value::Atom (s) => format!(".{}", s),
-        Value::BuiltinFunction (_) => "<builtin>".to_string(),
-        Value::BuiltinMethod (_) => "<object-builtin>".to_string(),
-        Value::BuiltinUnaryMethod (_) => "<property-builtin>".to_string(),
-        Value::Closure (ClosureValue {exec: e, need_args: n}) => {
+        Value::Null => "<null>".to_owned(),
+        Value::True => "<true>".to_owned(),
+        Value::Float(v) => v.to_owned(),
+        Value::String(s) => escape_string(s),
+        Value::Atom(s) => format!(".{}", s),
+        Value::BuiltinFunction(_) => "<builtin>".to_owned(),
+        Value::BuiltinMethod(_) => "<object-builtin>".to_owned(),
+        Value::BuiltinUnaryMethod(_) => "<property-builtin>".to_owned(),
+        Value::Closure(ClosureValue{exec: e, need_args: n}) => {
             let tag = match e {
-            	ClosureExec::User (_) => "closure",
-            	ClosureExec::Builtin (_) => "closure-builtin"
+            	ClosureExec::User(_) => "closure",
+            	ClosureExec::Builtin(_) => "closure-builtin"
             };
+            
             format!("<{}/{}>", tag, n)
         }
-        Value::Table (_) => wrapper("scope", v), /* From the user's perspective, a table is a scope */
-        Value::Object (_) => wrapper("object", v),
-        Value::Continuation (_) => "<return>".to_string()
+        Value::Table(_) => wrapper("scope", v), /* From the user's perspective, a table is a scope */
+        Value::Object(_) => wrapper("object", v),
+        Value::Continuation(_) => "<return>".to_owned()
     }
 }
 
@@ -169,8 +184,10 @@ pub fn simple_wrapper(label: &str, obj: &Value) -> String {
 
 pub fn label_wrapper(label: &str, obj: &Value) -> String {
 	angle_wrap(match *obj {
-		Value::Table (ref t) | Value::Object (ref t) =>
+		Value::Table(ref t)
+		| Value::Object(ref t) =>
 			&format!("{}:{}", label, id_string_for_table(t)),
+		
 		_ => label,
 	})
 }
@@ -178,17 +195,19 @@ pub fn label_wrapper(label: &str, obj: &Value) -> String {
 /* FIXME: The formatting here is not even a little bit generalized. */
 
 pub fn dump_value_unwrapped_table(t: &TableValue) -> String {
-	" = [\n            ".to_string()
+	" = [\n            ".to_owned()
 	+ &t.iter()
 		.map(|&(v1, v2)| format!("{} = {}", v1, v2))
-		.collect::<Vec<_>>()
+		.collect::<Vec<String>>()
 		.join("\n            ")
 	+ "\n        ]"
 }
 
 pub fn dump_value_table(v: &Value) -> String {
-	v.to_string() + match *v {
-		Value::Table (ref t) | Value::Object (ref t) => &dump_value_unwrapped_table(t),
+	v.to_owned() + match *v {
+		Value::Table(ref t)
+		| Value::Object(ref t) =>
+			&dump_value_unwrapped_table(t),
 		_ => "",
 	}
 }
@@ -197,15 +216,17 @@ pub fn dump_value_new_table(v: &Value) -> String {
 	if options::RUN.trace_set {
 		dump_value_table(v)
 	} else {
-		v.to_string()
+		v.to_owned()
 	}
 }
 
 /* Normal "print" uses this */
 pub fn dump_value_for_user(v: &Value) -> String {
 	match *v {
-		Value::String (ref s) | Value::Atom (ref s) => s.clone(),
-		_ => v.to_string(),
+		Value::String(ref s)
+		| Value::Atom(ref s) => s.clone(),
+		
+		_ => v.to_owned(),
 	}
 }
 
@@ -216,17 +237,17 @@ pub fn dump_value_for_user(v: &Value) -> String {
 
 /* Should the REPL show a key/value pair? if not hide it. */
 pub fn should_show_item(&&(k, _): &&(&Value, &Value)) -> bool {
-    !vec![value::PARENT_KEY, value::HAS_KEY, value::SET_KEY, value::LET_KEY]
+    ![value::PARENT_KEY, value::HAS_KEY, value::SET_KEY, value::LET_KEY]
     	.contains(k)
 }
 
 /* Sort items in objects/tables by key name */
 pub fn sort_items(&(k1, v1): &(&Value, &Value), &(k2, v2): &(&Value, &Value)) -> Ordering {
     match (*k1, *k2) {
-		(Value::Atom (s1), Value::Atom (s2)) => s1.cmp(s2),
-		(Value::Atom (_), _) => Ordering::Less,
-		(_, Value::Atom (_)) => Ordering::Greater,
-		(Value::Float (n1), Value::Float (n2)) => n1.cmp(n2),
+		(Value::Atom(s1), Value::Atom(s2)) => s1.cmp(s2),
+		(Value::Atom(_), _) => Ordering::Less,
+		(_, Value::Atom(_)) => Ordering::Greater,
+		(Value::Float(n1), Value::Float(n2)) => n1.cmp(n2),
 		_ => Ordering::Equal,
 	}
 }
@@ -234,9 +255,9 @@ pub fn sort_items(&(k1, v1): &(&Value, &Value), &(k2, v2): &(&Value, &Value)) ->
 /* Display the key atom -- special-cased to avoid using a dot, since defns don't use them */
 pub fn display_key(k: &Value) -> String {
     match *k {
-		Value::Atom (s) => s.clone(),
-		Value::Float (n) => format!("<{}>", n),
-		_ => "<error>".to_string()
+		Value::Atom(s) => s.clone(),
+		Value::Float(n) => format!("<{}>", n),
+		_ => "<error>".to_owned()
 	}
 }
 
@@ -246,9 +267,7 @@ pub fn truncate(mut s: String, limit_at: usize, reduce_to: usize, suffix: &str) 
     	s.truncate(reduce_to);
     	s + suffix
     }
-    else {
-    	s
-    }
+    else { s }
 }
 
 /* Provide a compact view of tables/objects for the REPL */

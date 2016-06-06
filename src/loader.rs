@@ -1,14 +1,22 @@
 /* Set up environment and invoke Execute */
 
 use std::fs;
+use std::collections::HashMap;
+use std::path::PathBuf;
 
+use execute;
+use internal_package;
+use options;
+use path;
+use token::Token;
+use value;
 use value::{
 	Value,
 	ExecuteStarter,
-	TableType,
+	TableValue,
 	TableBlankKind,
 };
-
+use value_util;
 use value_util::{
 	BoxTarget,
 	BoxSpec,
@@ -56,9 +64,9 @@ pub enum LoadLocation {
 }
 
 /* Given a loaderSource and a known context path, eliminate the SelfSource case */
-pub fn self_filter(self: Value, source: LoaderSource) -> {
+pub fn self_filter(this: Value, source: LoaderSource) -> LoaderSource {
 	match source {
-		LoaderSource::SelfSource => LoaderSource::Source(self),
+		LoaderSource::SelfSource => LoaderSource::Source(this),
 		_ => source,
 	}
 }
@@ -68,8 +76,8 @@ pub fn self_filter(self: Value, source: LoaderSource) -> {
 pub fn known_filter(source: LoaderSource) -> Option<Value> {
 	match source {
 		LoaderSource::NoSource => None,
-		LoaderSource::Source (x) => Some (x),
-		_ => ocaml::failwith("Internal error: Package loader attempted to load a file as if it were a directory".to_string()),
+		LoaderSource::Source(x) => Some(x),
+		_ => ocaml::failwith("Internal error: Package loader attempted to load a file as if it were a directory"),
 	}
 }
 /* There is one "base" starter plus one substarter for each file executed.
@@ -78,14 +86,14 @@ pub fn known_filter(source: LoaderSource) -> Option<Value> {
 /* Given a starter, make a new starter with a unique scope that is the child of the old starter's scope.
    Return both the starter and the new scope. */
 /* THIS COMMENT IS WRONG, FIX IT */
-pub fn sub_starter_with(starter: &ExecuteStarter, table: TableType) -> ExecuteStarter {
+pub fn sub_starter_with(starter: &ExecuteStarter, table: TableValue) -> ExecuteStarter {
     ExecuteStarter {
     	root_scope: Value::Table (table),
     	..starter
 	}
 }
 
-pub fn sub_starter_pair(kind: Option<TableBlankKind>, starter: ExecuteStarter) -> (TableType, ExecuteStarter) {
+pub fn sub_starter_pair(kind: Option<TableBlankKind>, starter: ExecuteStarter) -> (TableValue, ExecuteStarter) {
     let table = value_util::table_inheriting(kind.unwrap_or(TableBlankKind::NoLet), starter.root_scope);
     (table, sub_starter_with(starter, table))
 }
@@ -106,12 +114,12 @@ pub fn starter_for_execute(starter: ExecuteStarter, project: Option<Value>, dire
 }
 
 /* Loader is invoking execute internally to load a package from a file. */
-pub fn execute_package(starter: ExecuteStarter, project: Option<Value>, directory: Option<Value>, buf) -> {
-    execute::execute(starter_for_execute, starter, project, directory, buf)
+pub fn execute_package(starter: ExecuteStarter, project: Option<Value>, directory: Option<Value>, buf: Token) -> Value {
+    execute::execute(starter_for_execute(starter, project, directory), buf)
 }
 
 lazy_static! {
-	pub static mut ref PACKAGES_LOADED: HashMap<PathBuf, Value> = HashMap::new();
+	pub static ref PACKAGES_LOADED: HashMap<PathBuf, Value> = HashMap::new();
 }
 
 /* Create a package loader object. Will recursively call itself in a lazy way on field access.
@@ -121,9 +129,10 @@ lazy_static! {
          Maybe loading should be even lazier, such that load when a field is loaded *from* a file, load occurs?
          This would make prototype loading way easier. */
 /* FIXME: Couldn't kind be NewScope and the starter impose the box? */
-pub fn load_file(starter: ExecuteStarter, project_source: LoaderSource, directory: LoaderSource, path) -> {
+pub fn load_file(starter: ExecuteStarter, project_source: LoaderSource, directory: LoaderSource, path: String) -> Value {
     /* FIXME: What if known_filter is NoSource here? This is the "file where expected a directory" case. */
-    let buf = tokenize::tokenize_channel(CodeSource::File (path), fs::File::open(path));
+    let buf = tokenize::tokenize_channel(CodeSource::File(path), fs::File::open(path));
+    
     execute_package(starter, known_filter(project_source), known_filter(directory), buf)
 }
 
@@ -170,8 +179,8 @@ pub fn project_path_for_location(location: LoadLocation) -> PathBuf {
     match options::RUN.project_path {
         Some (ref p) => p.clone(),
         None => match location {
-        	Cwd => path::BOOT_PATH.clone(),
-        	Path (p) => p,
+        	LoadLocation::Cwd => path::BOOT_PATH.clone(),
+        	LoadLocation::Path (p) => p,
     	},
     }
 }
@@ -205,8 +214,11 @@ pub fn complete_starter(with_project_location: LoadLocation) -> ExecuteStarter {
     let populate_proto = |proto, path_key| {
         /* TODO convert path to either path or value to load from  */
         /* TODO find some way to make this not assume path loaded from disk */
-        let path = vec!["emily", "core", "prototype", path_key + ".em"].into_iter().fold(package_path, FilePath.concat);
-        let enclosing = load_package_dir(package_starter, LoaderSource::NoSource, Filename.dirname path);
+        let mut path = package_path.clone();
+        for dirname in ["emily", "core", "prototype", &(path_key + ".em")].iter() {
+        	path.push(dirname);
+    	}
+        let enclosing = load_package_dir(package_starter, LoaderSource::NoSource, path.parent().unwrap());
         load_file(
             box_sub_starter(package_starter, BoxSpec::Populating(BoxTarget::Package, proto)),
             LoaderSource::NoSource,

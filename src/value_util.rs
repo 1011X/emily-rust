@@ -1,8 +1,4 @@
 /* This file contains support methods for creating values with certain properties, split out from Value for module recursion reasons. */
-#![feature(slice_patterns, advanced_slice_patterns)]
-
-#[macro_use]
-extern crate lazy_static;
 
 use std::collections::HashMap;
 use value::*;
@@ -10,7 +6,7 @@ use token::*;
 
 /* Misc failure throw methods */
 pub fn bad_arg(desired: &'static str, name: &'static str, var: &Value) -> Result<(), String> {
-	Err (format!("Bad argument to {}: Need {}, got {}", name, desired, pretty::dump_value(var)))
+	Err(format!("Bad argument to {}: Need {}, got {}", name, desired, pretty::dump_value(var)))
 }
 
 pub fn bad_arg_table(name: &'static str, var: &Value) -> Result<(), String> {
@@ -22,7 +18,7 @@ pub fn bad_arg_closure(name: &'static str, var: &Value) -> Result<(), String> {
 }
 
 pub fn impossible_arg(name: &'static str) -> Result<(), String> {
-	Err (format!("Internal failure: Impossible argument to {}", name))
+	Err(format!("Internal failure: Impossible argument to {}", name))
 }
 
 
@@ -31,7 +27,7 @@ pub fn misapply_string(a: &Value, b: &Value) -> String {
 }
 
 pub fn raw_misapply_arg(a: &Value, b: &Value) -> Result<(), String> {
-	Err (misapply_string(a, b))
+	Err(misapply_string(a, b))
 }
 
 /* Tools */
@@ -134,7 +130,7 @@ lazy_static! {
 	/* ...used to define the ternary function with short-circuiting: */
 	/* This is used by snippets that require tern, but tern in scope_prototype is separate. */
 	pub static ref TERN: Value = snippet_text_closure(
-		CodeSource::Internal ("TERN"),
+		CodeSource::Internal("TERN"),
 		vec![
 			("rawTern", RAW_TERN),
 			("null", Value::Null)
@@ -188,7 +184,7 @@ lazy_static! {
 	pub static ref RETHIS_ASSIGN_OBJECT: Value = snippet_closure(1, |args|
 		match &*args {
 			[a] => raw_rethis_assign_object(a),
-			_ => impossible_arg("RETHIS_ASSIGN_OBJECT");
+			_ => impossible_arg("RETHIS_ASSIGN_OBJECT"),
 		}
 	);
 }
@@ -232,7 +228,7 @@ lazy_static! {
 
 	/* A curried one which knows how to check the super class: */
 	pub static ref HAS_CONSTRUCT: Value = snippet_text_closure(
-		CodeSource::Internal ("HAS_CONSTRUCT"),
+		CodeSource::Internal("HAS_CONSTRUCT"),
 		vec![
 			("rawHas", RAW_HAS),
 			("tern", TERN),
@@ -265,7 +261,7 @@ lazy_static! {
 
 	/* ...And a factory for a curried one that knows how to check the super class: */
 	pub static ref SET_CONSTRUCT: Value = snippet_text_closure(
-		CodeSource::Internal ("SET_CONSTRUCT"),
+		CodeSource::Internal("SET_CONSTRUCT"),
 		vec![
 			("rawHas", RAW_HAS),
 			("rawSet", RAW_SET),
@@ -288,7 +284,7 @@ lazy_static! {
 /* Same thing, but for a Value::Object instead of a Value::Table.
    The difference lies in how "this" is treated */
 	pub static ref OBJECT_SET_CONSTRUCT: Value = snippet_text_closure(
-		CodeSource::Internal ("OBJECT_SET_CONSTRUCT"),
+		CodeSource::Internal("OBJECT_SET_CONSTRUCT"),
 		vec![
 			("rawHas", RAW_HAS),
 			("rawSet", RAW_SET),
@@ -370,7 +366,7 @@ pub fn populate_let_for_scope(store_in: TableValue, write_to: TableValue) {
 }
 
 /* Give me a simple table of the requested type, prepopulate with basics. */
-pub fn table_blank(kind: TableBlankKind) -> TableType {
+pub fn table_blank(kind: TableBlankKind) -> TableValue {
 	let t = table_true_blank();
 	match kind {
 		TableBlankKind::TrueBlank => {}
@@ -387,9 +383,9 @@ pub fn table_blank(kind: TableBlankKind) -> TableType {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum BoxTarget { Package, Object }
 
-pub enum BoxSpec { Populating(BoxTarget, Value) }
+pub enum BoxSpec { Populating (BoxTarget, Value) }
 
-pub fn box_blank(box_kind: BoxSpec, box_parent: Value) -> TableType {
+pub fn box_blank(box_kind: BoxSpec, box_parent: Value) -> TableValue {
 	let BoxSpec::Populating (target_type, target_value) = box_kind;
     let mut t = table_blank(TableBlankKind::NoLet);
     let mut private_table = table_blank(TableBlankKind::NoLet);
@@ -423,7 +419,7 @@ pub fn box_blank(box_kind: BoxSpec, box_parent: Value) -> TableType {
     t
 }
 
-pub fn table_inheriting(table_kind: TableBlankKind, v: Value) -> TableType {
+pub fn table_inheriting(table_kind: TableBlankKind, v: Value) -> TableValue {
 	let mut t = table_blank(table_kind);
 	t.insert(value::PARENT_KEY.clone(), v);
 	t
@@ -441,7 +437,7 @@ pub fn raw_rethis_transplant(obj: Value) -> Value {
 lazy_static! {
 	pub static ref RETHIS_TRANSPLANT: Value = snippet_closure(1, |args|
 		match &*args {
-			[mut ref obj] => raw_rethis_transplant(obj),
+			[ref mut obj] => raw_rethis_transplant(obj),
 			_ => impossible_arg("RETHIS_TRANSPLANT")
 		}
 	);
@@ -476,7 +472,7 @@ lazy_static! {
 
 	/* Factory for super functions */
 	pub static ref SUPER_CONSTRUCT: Value = snippet_text_closure(
-		CodeSource::Internal ("SUPER_CONSTRUCT"),
+		CodeSource::Internal("SUPER_CONSTRUCT"),
 		vec![
 			("rethis", RETHIS_SUPER_FROM),
 			("rawHas", RAW_HAS),

@@ -1,12 +1,8 @@
 /* Macro processing */
-#![feature(box_syntax, fnbox)]
-
-#[macro_use]
-extern crate lazy_static;
-
 use std::collections::HashMap;
 use std::sync::{Once, ONCE_INIT};
 
+use ocaml;
 use token::{
     TokenContents,
     TokenClosureKind,
@@ -22,18 +18,18 @@ pub fn fail_token(at: &Token, mesg: &str) -> Result<(), token::CompilationError>
 
 /* Last thing we always do is make sure no symbols survive after macro processing. */
 pub fn verify_symbols(line: &SingleLine) -> Result<SingleLine, token::CompilationError> {
-    for &token in line {
-        if let Token {contents: TokenContents::Symbol (s), ref at} = token {
-            return Err (token::fail_at(at, &format!("Unrecognized symbol {}", s)).unwrap_err());
+    for token in line {
+        if let &Token {contents: TokenContents::Symbol(s), ref at} = token {
+            return Err(token::fail_at(at, &format!("Unrecognized symbol {}", s)).unwrap_err());
         }
     }
-    Ok (line)
+    Ok(line)
 }
 
 /* Types for macro processing. */
 
 #[derive(Clone, Copy)]
-pub enum MacroPriority { L (f64), R (f64) } /* See builtinMacros comment */
+pub enum MacroPriority { L(f64), R(f64) } /* See builtinMacros comment */
 
 pub type SingleLine = Vec<Token>;
 
@@ -62,7 +58,7 @@ lazy_static! {
 		let mut hm = HashMap::with_capacity(BUILTIN_MACROS.len());
 		
 		for &(priority, key, spec_function) in &BUILTIN_MACROS {
-			hm.insert(key, MacroSpec {priority, spec_function});
+			hm.insert(key, MacroSpec {priority: priority, spec_function: spec_function});
 		}
 		
 		hm
@@ -71,11 +67,11 @@ lazy_static! {
 
 /* All manufactured tokens should be made through clone, so that position information is retained */
 pub fn clone_atom(at: &CodePosition, s: &str) -> Token {
-    token::clone(at, &TokenContents::Atom (s))
+    token::clone(at, &TokenContents::Atom(Cow::Borrowed(s)))
 }
 
 pub fn clone_word(at: &CodePosition, s: &str) -> Token {
-    token::clone(at, &TokenContents::Word (s))
+    token::clone(at, &TokenContents::Word(Cow::Borrowed(s)))
 }
 
 pub fn clone_group(at: &CodePosition) -> Token {
@@ -95,7 +91,7 @@ lazy_static! {
 		    line_number: 0,
 		    line_offset: 0
 		},
-		TokenContents::Symbol ("_"),
+		TokenContents::Symbol(Cow::Borrowed("_")),
 	);
 }
 
@@ -122,10 +118,10 @@ pub fn process(l: SingleLine) -> SingleLine {
         /* Investigate token under cursor */
         match present.contents {
             /* Words or symbols can currently be triggers for macros. */
-            TokenContents::Word (s) |
-            TokenContents::Symbol (s) => match MACRO_TABLE.get(s) { /* Is the current word/symbol a thing in the macro table? */
+            TokenContents::Word(s)
+            | TokenContents::Symbol(s) => match MACRO_TABLE.get(&s) { /* Is the current word/symbol a thing in the macro table? */
                 /* It's in the table; now to decide if it's an ideal match. */
-                Some (&MacroSpec {priority, spec_function}) => {
+                Some(&MacroSpec {priority, spec_function}) => {
                     /* True if this macro is better fit than the current candidate. */
                     let better = match (best_priority, priority) {
                         /* No matches yet, automatic win. */
@@ -133,21 +129,21 @@ pub fn process(l: SingleLine) -> SingleLine {
 
                         /* If associativity varies, we can determine winner based on that alone: */
                         /* Prefer higher priority, but break ties toward left-first macros over right-first ones. */
-                        (Some (L (left)), R (right)) => left < right,
-                        (Some (R (left)), L (right)) => left <= right,
+                        (Some(L(left)), R(right)) => left < right,
+                        (Some(R(left)), L(right)) => left <= right,
 
                         /* "Process leftmost first": Prefer higher priority, break ties to the left. */
-                        (Some (L (left)), L (right)) => left < right,
+                        (Some(L(left)), L(right)) => left < right,
 
                         /* "Process rightmost first": Prefer higher priority, break ties to the right. */
-                        (Some (R (left)), R (right)) => left <= right,
+                        (Some(R(left)), R(right)) => left <= right,
                     };
                     
                     if better {
-                        proceed(Some (priority), Some (MacroMatch {
-                        	past: past,
-                        	present: present,
-                        	future: future,
+                        proceed(Some(priority), Some(MacroMatch {
+                        	past,
+                        	present,
+                        	future,
                         	match_function: spec_function,
                         }));
                     }
@@ -308,22 +304,22 @@ pub fn question(past: SingleLine, at: &CodePosition, future: SingleLine) -> Sing
     
     loop {
         match rest {
-            [more_rest.., ref colon_at @ Token {contents: TokenContents::Symbol (":"), ..}] => return Ok (vec![
+            [more_rest.., ref colon_at @ Token {contents: TokenContents::Symbol(Cow::Borrowed(":")), ..}] => return Ok(vec![
 				clone_word(at, "tern".to_string()),
 				new_future(at, past.into_iter().rev().collect()),
 				new_future_closure(at, a.into_iter().rev().collect()),
 				new_future_closure(colon_at, more_rest.to_vec())
 			]),
                 
-            [more_rest.., Token {contents: TokenContents::Symbol ("?"), ..}] =>
-                return Err (token::fail_token(at, "Nesting like ? ? : : is not allowed.".to_string())),
+            [more_rest.., Token {contents: TokenContents::Symbol(Cow::Borrowed("?")), ..}] =>
+                return Err(token::fail_token(at, "Nesting like ? ? : : is not allowed.")),
             
             [more_rest.., token] => {
             	a.push(token);
             	rest = more_rest;
             }
             
-            [] => return Err (token::fail_token(at, ": expected somewhere to right of ?".to_string())),
+            [] => return Err(token::fail_token(at, ": expected somewhere to right of ?")),
         }
     }
 }
@@ -331,19 +327,19 @@ pub fn question(past: SingleLine, at: &CodePosition, future: SingleLine) -> Sing
 /* Works like Perl // */
 pub fn ifndef(past: SingleLine, at: &CodePosition, future: SingleLine) -> Result<SingleLine, CompilationError> {
     let (target, key) = match &*past {
-        [ref token @ Token {contents: TokenContents::Word (name), ..}] =>
-        	(clone_word(at, "scope"), clone_atom(token, name)),
+        [ref token @ Token {contents: TokenContents::Word(name), ..}] =>
+        	(clone_word(at, "scope"), clone_atom(token, &name)),
     	
         [left] =>
-        	return Err (token::fail_token(left, "Either a variable name or a field access is expected to left of //").unwrap_err()),
+        	return Err(token::fail_token(left, "Either a variable name or a field access is expected to left of //").unwrap_err()),
     	
         [more_tokens.., token] =>
         	(new_past(at, moreTokens), token),
     	
-        [] => return Err (token::fail_token(at, "Nothing found to left of // operator").unwrap_err()),
+        [] => return Err(token::fail_token(at, "Nothing found to left of // operator").unwrap_err()),
     };
     
-    Ok (vec![
+    Ok(vec![
     	clone_word(at, "check"),
     	target,
     	key,
@@ -362,7 +358,7 @@ pub fn assignment(past: SingleLine, at: &CodePosition, future: SingleLine) -> Si
             None => new_future(at, future),
 
             /* Bindings exist: This is a function definition. */
-            Some (bindings) => token::clone_group(
+            Some(bindings) => token::clone_group(
             	at,
             	TokenClosureKind::ClosureWithBinding (true, bindings.into_iter().rev().collect()),
             	TokenScopeKind::Plain,
@@ -383,22 +379,23 @@ pub fn assignment(past: SingleLine, at: &CodePosition, future: SingleLine) -> Si
             /* Done with bindings now, just have to figure out what we're assigning to */
             match (&*lookups, &*cmd) {
                 /* ...Nothing? */
-                ([], _) => return Err (token::fail_token(at, "Found a =, but nothing to assign to.").unwrap_err()),
+                ([], _) => return Err(token::fail_token(at, "Found a =, but nothing to assign to.").unwrap_err()),
 
                 /* Sorta awkward, detect the "nonlocal" prefix and swap out let. This should be generalized. */
-                ([more_lookups.., cmd_token @ Token {contents: TokenContents::Word ("nonlocal"), ..}], "let") => {
+                ([more_lookups.., cmd_token @ Token {contents: TokenContents::Word(Cow::Borrowed("nonlocal")), ..}], "let") => {
                 	cmd_at = cmd_token;
                 	cmd = value::SET_KEY_STRING.to_string();
                 	lookups = more_lookups.to_vec();
             	}
 
                 /* Looks like a = b */
-                ([token], _) => return Ok (vec![
+                ([token], _) => return Ok(vec![
                 	clone_word(&cmd_at, cmd),
                 	/* FIXME: Nothing now prevents assigning to a number in a plain scope? */
                     match token {
-                        Token {contents: TokenContents::Word (name)} =>
-                        	clone_atom(token, name),
+                        Token {contents: TokenContents::Word(name)} =>
+                        	clone_atom(token, &name),
+                    	
                         token => token,
                     },
                     rightside
@@ -414,7 +411,7 @@ pub fn assignment(past: SingleLine, at: &CodePosition, future: SingleLine) -> Si
                 	].flat_map(|t| t.into_iter()).collect(),
 
                     /* Excluded by [{Token.word}] case above */
-                    _ => token::fail_token(at, "Internal failure: Reached impossible place".to_string()),
+                    _ => token::fail_token(at, "Internal failure: Reached impossible place"),
                 },
             }
         };
@@ -426,20 +423,20 @@ pub fn assignment(past: SingleLine, at: &CodePosition, future: SingleLine) -> Si
     fn process_left(remaining_left: SingleLine, lookups: SingleLine, bindings: Option<Vec<String>>) -> SingleLine {
         match (remaining_left, bindings) {
             /* If we see a ^, switch to loading bindings */
-            ([Token {contents: TokenContents::Symbol ("^"), ..}, more_left..], None) =>
-                process_left(more_left, lookups, Some (vec![])),
+            ([Token {contents: TokenContents::Symbol(Cow::Borrowed("^")), ..}, more_left..], None) =>
+                process_left(more_left, lookups, Some(vec![])),
 
             /* If we're already loading bindings, just skip it */
-            ([Token {contents: TokenContents::Symbol ("^"), ..}, more_left..], _) =>
+            ([Token {contents: TokenContents::Symbol(Cow::Borrowed("^")), ..}, more_left..], _) =>
                 process_left(more_left, lookups, bindings),
 
             /* Sanitize any symbols that aren't cleared for the left side of an = */
-            ([Token {contents: TokenContents::Symbol (x), ..}, ..], _) =>
-            	failwith(format!("Unexpected symbol {} to left of = ", x)),
+            ([Token {contents: TokenContents::Symbol(ref x), ..}, ..], _) =>
+            	ocaml::failwith(&format!("Unexpected symbol {} to left of = ", x)),
 
             /* We're adding bindings */
-            ([Token {contents: TokenContents::Word (b), ..}, rest_past..], Some (bindings)) =>
-                process_left(rest_past, lookups, Some (bindings.into_iter().chain(vec![b]).collect())),
+            ([Token {contents: TokenContents::Word(ref b), ..}, rest_past..], Some(bindings)) =>
+                process_left(rest_past, lookups, Some(bindings.into_iter().chain(vec![b]).collect())),
 
             /* We're adding lookups */
             ([l, rest_past..], None) =>
@@ -449,7 +446,7 @@ pub fn assignment(past: SingleLine, at: &CodePosition, future: SingleLine) -> Si
             ([], _) => result(lookups, bindings),
 
             /* Apparently did something like 3 = */
-            ([token, ..], _) => token::fail_token(token, format!("Don't know what to do with {} to left of =", pretty::dump_code_tree_terse(token))),
+            ([token, ..], _) => token::fail_token(token, &format!("Don't know what to do with {} to left of =", pretty::dump_code_tree_terse(token))),
         }
     }
 
@@ -463,19 +460,19 @@ pub fn closure_construct(with_return: bool) -> MacroFunction {
         fn open_closure(bindings: Vec<String>, future: SingleLine) -> SingleLine {
             match &*future {
                 /* If redundant ^s seen, skip them. */
-                [Token {contents: TokenContents::Symbol ("^"), ..}, more_future..] =>
+                [Token {contents: TokenContents::Symbol(Cow::Borrowed("^")), ..}, more_future..] =>
                     open_closure(bindings, more_future.to_vec()),
 
                 /* This is a binding, add to list. */
-                [Token {contents: TokenContents::Word (b), ..}, more_future..] =>
+                [Token {contents: TokenContents::Word(ref b), ..}, more_future..] =>
                     open_closure(bindings.into_iter().chain(vec![b]).collect(), more_future),
 
                 /* This is a group, we are done now. */
                 [Token {contents: TokenContents::Group(TokenGroup {closure: TokenClosureKind::NonClosure, kind, group_initializer, items}), ..}, more_future..] => match kind {
                         /* They asked for ^[], unsupported. */
-                        TokenGroupKind::Box (_) => token::fail_token(at, "Can't use object literal with ^"),
+                        TokenGroupKind::Box(_) => token::fail_token(at, "Can't use object literal with ^"),
                         /* Supported group */
-                        _ => arrange_token(at, past, token::clone_group(at, TokenClosureKind::ClosureWithBinding (with_return, bindings.into_iter().rev().collect()), kind, group_initializer, items), more_future.to_vec()),
+                        _ => arrange_token(at, past, token::clone_group(at, TokenClosureKind::ClosureWithBinding(with_return, bindings.into_iter().rev().collect()), kind, group_initializer, items), more_future.to_vec()),
                 },
 
                 /* Reached end of line */
@@ -537,9 +534,9 @@ pub fn comma(past: SingleLine, at: CodePosition, future: SingleLine) -> SingleLi
 pub fn atom(past: SingleLine, at: CodePosition, future: SingleLine) -> SingleLine {
     match &*future {
         /* Look at next token and nothing else. */
-        [Token {contents: TokenContents::Word (a), ..}, more_future..] =>
+        [Token {contents: TokenContents::Word(ref a), ..}, more_future..] =>
             arrange_token(at, past, clone_atom(at, a), more_future.to_vec()),
-        _ => token::fail_token(at, "Expected identifier after .".to_string()),
+        _ => token::fail_token(at, "Expected identifier after ."),
     }
 }
 
@@ -552,7 +549,7 @@ pub fn make_dual_mode_splitter(unary_atom: String, binary_atom: String) -> Macro
 		match &*past {
 		    [] => prefix_unary(past, at, future),
 		    
-		    [Token {contents: TokenContents::Symbol (s), ..}, ..]
+		    [Token {contents: TokenContents::Symbol(ref s), ..}, ..]
 		    /* Because this is intended for unary -, special-case arithmetic. */
 		    /* I don't much like this solution? */
 		    if s == "*" || s == "/" || s == "%" || s == "-" || s == "+" =>
@@ -601,7 +598,7 @@ lazy_static! {
 		(R(40.), "/", make_splitter("divide")),
 		(R(40.), "*", make_splitter("times")),
 		(R(40.), "%", make_splitter("mod")),
-		(R(50.), "-", make_dual_mode_splitter("negate" "minus")),
+		(R(50.), "-", make_dual_mode_splitter("negate", "minus")),
 		(R(50.), "+", make_splitter("plus")),
 
 		/* Comparators */

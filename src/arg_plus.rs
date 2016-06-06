@@ -10,9 +10,7 @@ Not all features of Arg are implemented, notably most spec types are not support
 use std::env;
 use std::collections::HashMap;
 
-use ocaml;
 use ocaml::arg;
-
 use ocaml::arg::Spec;
 
 /* I use this to turn a single set of rules into simultaneously environment and argument parse rules. See options.ml */

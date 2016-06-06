@@ -1,11 +1,8 @@
 /* Parse and validate command line arguments. */
 
-#[macro_use]
-extern crate lazy_static;
-extern crate getopts;
-
 use std::env;
 use std::io;
+use std::path;
 use std::process;
 use std::sync;
 
@@ -17,8 +14,8 @@ lazy_static! {
 
 pub enum ExecutionTarget {
 	Stdin,
-	File (String),
-	Literal (String)
+	File(PathBuf),
+	Literal(String)
 }
 
 pub struct OptionSpec {
@@ -44,7 +41,7 @@ pub struct OptionSpec {
 }
 
 lazy_static! {
-	pub static ref mut RUN: OptionSpec = OptionSpec {
+	pub static ref RUN: OptionSpec = OptionSpec {
 		target: None,
 		args: vec![],
 		repl: false,
@@ -106,7 +103,7 @@ Sample usage:
 
 		/* Args */
 		("-e", Arg.String(|f| {
-			RUN.target = Some(ExecutionTarget::Literal (f));
+			RUN.target = Some(ExecutionTarget::Literal(f));
 			Err(ArgPlus.Complete)
 		}), "Execute code inline")
 	];
@@ -244,10 +241,10 @@ Sample usage:
 	ArgPlus.argParse(args, targetParse, usage, |progArgs|
 		/* Arguments are parsed; either short-circuit with an informational message, or store targets */
 		if RUN.print_machine_version {
-			println!(VERSION);
+			println!("{}", VERSION);
 		}
 		else if RUN.print_version {
-			println!(FULL_VERSION);
+			println!("{}", FULL_VERSION);
 		}
 		else {
 			RUN.args = progArgs;

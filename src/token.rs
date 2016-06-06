@@ -1,6 +1,4 @@
 /* Data representation for an AST. */
-use CodeSource::*;
-use TokenFailureKind::*;
 
 use std::fmt;
 use std::string::ToString;
@@ -11,20 +9,20 @@ pub enum CodeSource {
 	Stdin,
 	Cmdline,
 	Unknown,
-	Internal (&'static str),
-	File (String)
+	Internal(&'static str),
+	File(PathBuf)
 }
 
 /* Make CodeSource human-readable */
 impl fmt::Display for CodeSource {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match *self {
-			Stdin => f.write_str("<input>"),
-			Cmdline => f.write_str("<commandline>"),
-			Unknown => f.write_str("<unknown>"),
+			CodeSource::Stdin => f.write_str("<input>"),
+			CodeSource::Cmdline => f.write_str("<commandline>"),
+			CodeSource::Unknown => f.write_str("<unknown>"),
 			
-			Internal (s) => f.write_fmt(format_args!("<internal:{}>", s)),
-			File (ref s) => f.write_fmt(format_args!("'{}'", s)),
+			CodeSource::Internal(s) => f.write_fmt(format_args!("<internal:{}>", s)),
+			CodeSource::File(ref s) => f.write_fmt(format_args!("'{}'", s.display())),
 		}
 	}
 }
@@ -92,10 +90,10 @@ pub struct TokenGroup {
 /* Data content of a token */
 #[derive(Clone)]
 pub enum TokenContents<'a> {
-	Word (&'a str),   /* Alphanum */
-	Symbol (&'a str), /* Punctuation-- appears pre-macro only. */
-	String (&'a str), /* "Quoted" */
-	Atom (&'a str),   /* Ideally appears post-macro only */
+	Word (Cow<'a, str>),   /* Alphanum */
+	Symbol (Cow<'a, str>), /* Punctuation-- appears pre-macro only. */
+	String (Cow<'a, str>), /* "Quoted" */
+	Atom (Cow<'a, str>),   /* Ideally appears post-macro only */
 	Number (f64),
 	Group (TokenGroup),
 }
@@ -174,21 +172,23 @@ pub enum TokenFailureKind {
 	MacroError
 }
 
-pub struct CompilationError (TokenFailureKind, CodePosition, String);
+pub struct CompilationError(TokenFailureKind, CodePosition, String);
 
 impl fmt::Display for CompilationError {
+	
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		let CompilationError (_, ref at, ref mesg) = *self;
+		let CompilationError(_, ref at, ref mesg) = *self;
+		
 		f.write_fmt(format_args!("Fatal error: {} {}", mesg, at))
 	}
 }
 
 pub fn incomplete_at(at: &CodePosition, mesg: &str) -> Result<(), CompilationError> {
-	Err (CompilationError (TokenFailureKind::IncompleteError, at.clone(), mesg.to_string()))
+	Err(CompilationError(TokenFailureKind::IncompleteError, at.clone(), mesg.to_owned()))
 }
 
 pub fn fail_at(at: &CodePosition, mesg: &str) -> Result<(), CompilationError> {
-	Err (CompilationError (TokenFailureKind::InvalidError, at.clone(), mesg.to_string()))
+	Err(CompilationError(TokenFailureKind::InvalidError, at.clone(), mesg.to_owned()))
 }
 
 pub fn fail_token(at: &Token, mesg: &str) -> Result<(), CompilationError> {

@@ -1,8 +1,5 @@
 /* Simple path tools */
 
-#[macro_use]
-extern crate lazy_static;
-
 use std::fs;
 use std::env;
 use std::path::{Path, PathBuf};
