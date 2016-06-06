@@ -36,16 +36,16 @@ pub fn env_parse(arg: Vec<(arg::Key, arg::Spec, arg::Doc)>) -> Result<(), ocaml:
 	for (key, spec, _) in arg {
 		/* Rather than iterating env, iterate the rule list and check for each env we recognize */
 		let value = match env::var(key) { /* May fail */
-			Ok (v) => v,
-			Err (_) => continue, /* env::var failed, which means the env var wasn't present. Move on */
+			Ok(v) => v,
+			Err(_) => continue, /* env::var failed, which means the env var wasn't present. Move on */
 		};
 		
 		match spec {
 			/* Discard argument-- does this ever even make sense? */
-			Spec::Unit (f) => f(),
+			Spec::Unit(f) => f(),
 
 			/* String argument */
-			Spec::String (f) => f(value),
+			Spec::String(f) => f(value),
 
 			/* Incorrect use of ArgParse */
 			_ => return arg_plus_limitations("env_parse"),

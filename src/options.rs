@@ -4,13 +4,9 @@ use std::env;
 use std::io;
 use std::path;
 use std::process;
-use std::sync;
+use std::sync::{Once, ONCE_INIT};
 
-pub static VERSION: &'static str = "0.3b";
-
-lazy_static! {
-	pub static ref FULL_VERSION: String = format!("Emily language interpreter: Version {}", VERSION);
-}
+//use arg_plus;
 
 pub enum ExecutionTarget {
 	Stdin,
@@ -40,7 +36,12 @@ pub struct OptionSpec {
 	print_machine_version: bool
 }
 
+
+pub static VERSION: &'static str = "0.3b";
+
 lazy_static! {
+	pub static ref FULL_VERSION: String = format!("Emily language interpreter: Version {}", VERSION);
+	
 	pub static ref RUN: OptionSpec = OptionSpec {
 		target: None,
 		args: vec![],
@@ -78,7 +79,7 @@ fn build_path_set_spec<F: Fn(String)>(name: [&'static str; 2], action: F, what_i
 }
 
 
-static START: sync::Once = sync::ONCE_INIT;
+static START: Once = ONCE_INIT;
 
 pub fn init() {
 START.call_once(|| {
@@ -109,8 +110,8 @@ Sample usage:
 	];
 
 	let environment_args = [ /* "Config" arguments which can be also set with env vars */
-		build_path_set_spec(["package", "path"], |a| RUN.package_path = Some (a), "package"),
-		build_path_set_spec(["project", "path"], |a| RUN.project_path = Some (a), "project")
+		build_path_set_spec(["package", "path"], |a| RUN.package_path = Some(a), "package"),
+		build_path_set_spec(["project", "path"], |a| RUN.project_path = Some(a), "project")
 	];
 
 	let args = {
@@ -121,7 +122,7 @@ Sample usage:
 	};
 
 	let targetParse = |t| {
-		RUN.target = ExecutionTarget::File (t);
+		RUN.target = ExecutionTarget::File(t);
 		Err(ArgPlus.Complete)
 	};
 	

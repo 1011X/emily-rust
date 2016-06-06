@@ -1,4 +1,6 @@
 /* Loads a program and runs it, based on contents of Options. */
+
+/*
 #![feature(box_syntax)]
 #![feature(slice_patterns)]
 #![feature(advanced_slice_patterns)]
@@ -30,15 +32,16 @@ mod token;
 mod loader;
 mod pretty;
 mod repl;
-
-use std::fs;
-use std::io;
-use std::process;
+*/
 
 use options::ExecutionTarget;
 use token::CodeSource;
 use loader::LoadLocation;
 use tokenize::Error;
+
+use std::fs;
+use std::io;
+use std::process;
 
 fn main() {
 	options::init();

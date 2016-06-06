@@ -9,15 +9,15 @@ use internal_package;
 use options;
 use path;
 use token::Token;
-use value;
 use value::{
+	self,
 	Value,
 	ExecuteStarter,
 	TableValue,
 	TableBlankKind,
 };
-use value_util;
 use value_util::{
+	self,
 	BoxTarget,
 	BoxSpec,
 };
@@ -54,13 +54,13 @@ pub fn package_root_path() -> PathBuf {
 pub enum LoaderSource {
     NoSource,                  /* I don't want the loader */
     SelfSource,                /* I want the loader inferred from context */
-    Source (Value),            /* I want it to load from a specific path */
+    Source(Value),            /* I want it to load from a specific path */
 }
 
 /* From what source should the project/directory loaders for this execution come? */
 pub enum LoadLocation {
     Cwd,            /* From the current working directory */
-    Path (String),  /* From a known location */
+    Path(String),  /* From a known location */
 }
 
 /* Given a loaderSource and a known context path, eliminate the SelfSource case */

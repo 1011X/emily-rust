@@ -1,7 +1,4 @@
-use std::sync::{
-	Once,
-	ONCE_INIT
-};
+use std::sync::{Once, ONCE_INIT};
 
 use value::{
 	TableBlankKind,
