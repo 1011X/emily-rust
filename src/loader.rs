@@ -45,7 +45,7 @@ lazy_static! {
 
 pub fn package_root_path() -> PathBuf {
     match options::RUN.package_path {
-    	Some (ref s) => s.clone(),
+    	Some(ref s) => s.clone(),
     	_ => DEFAULT_PACKAGE_PATH.clone(),
 	}
 }

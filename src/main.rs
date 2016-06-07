@@ -90,7 +90,7 @@ fn main() {
 	    /* option.ml would have failed already if that weren't ok. */
 		let result = process_one(options::RUN.target
 			.as_ref()
-			.unwrap_or(ExecutionTarget::Literal("".to_string()))
+			.unwrap_or(ExecutionTarget::Literal(String::new()))
 		);
 		
 		match result {
