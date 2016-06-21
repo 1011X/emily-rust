@@ -144,10 +144,10 @@ lazy_static! {
    It takes newborn functions and assigns a this to them. (Old functions just freeze.) */
 pub fn raw_rethis_assign_object_definition(obj: &Value, mut v: Value) -> Value {
 	match v {
-		Value::Closure (c @ ClosureValue {this: ClosureThis::Blank, ..}) =>
+		Value::Closure(c @ ClosureValue {this: ClosureThis::Blank, ..}) =>
 			c.this = ClosureThis::Current(obj, obj.clone()),
 		
-		Value::Closure (c @ ClosureValue {this: ClosureThis::Current(current, this), ..}) =>
+		Value::Closure(c @ ClosureValue {this: ClosureThis::Current(current, this), ..}) =>
 			c.this = ClosureThis::Frozen(current, this),
 		
 		_ => {}
@@ -219,7 +219,7 @@ pub fn act_pair_table_set(t1v: Value, t1: TableValue, t2v: Value, t2: TableValue
 lazy_static! {
 	/* Most tables need to be prepopulated with a "has". Here's the has tester for a singular table: */
 	pub static ref RAW_HAS: Value = snippet_closure(2, |args| match &*args {
-		[Value::Table (t), key] | [Value::Object (t), key] =>
+		[Value::Table(t), key] | [Value::Object(t), key] =>
 			bool_cast(t.contains_key(key)),
 		
 		[v, _] => bad_arg_table("RAW_HAS", v),
@@ -319,12 +319,12 @@ pub fn make_let<F: Fn(Value, Value)>(action: F) -> Value {
 /* Helpers for table_blank */
 pub fn populate_with_has(t: &mut TableValue) {
 	/* FIXME: Should this ever be ObjectValue...? */
-	t.insert(Value::Atom (HAS_KEY_STRING.to_string()), make_has(Value::Table (t.clone())));
+	t.insert(Value::Atom(Cow::from(HAS_KEY_STRING)), make_has(Value::Table(t.clone())));
 }
 
 pub fn populate_with_set(t: &mut TableValue) {
 	populate_with_has(t);
-	t.insert(Value::Atom (SET_KEY_STRING.to_string()), make_set(Value::Table (t.clone())));
+	t.insert(Value::Atom(Cow::from(SET_KEY_STRING)), make_set(Value::Table(t.clone())));
 }
 
 /* Not unified with table_blank because it returns a value */
@@ -334,11 +334,11 @@ pub fn object_blank(context: ExecuteContext) -> Value {
 	
 	populate_with_has(&mut obj);
 	obj.insert(
-		Value::Atom (SET_KEY_STRING.to_string()),
-		Value::Closure (make_object_set(obj_value.clone()))
+		Value::Atom(Cow::from(SET_KEY_STRING)),
+		Value::Closure(make_object_set(obj_value.clone()))
 	);
 	obj.insert(
-		Value::Atom (LET_KEY_STRING.to_string()),
+		Value::Atom(Cow::from(LET_KEY_STRING)),
 		make_let(act_table_set_with(
 			rethis_assign_object_inside_let,
 			obj_value,
@@ -346,7 +346,7 @@ pub fn object_blank(context: ExecuteContext) -> Value {
 		))
 	);
 	obj.insert(
-		Value::Atom (PARENT_KEY_STRING.to_string()),
+		Value::Atom(Cow::from(PARENT_KEY_STRING)),
 		context.object_proto
 	);
 	obj_value
@@ -355,10 +355,10 @@ pub fn object_blank(context: ExecuteContext) -> Value {
 /* FIXME: Once act_table_set no longer takes a table value, the dummy Value::Table will not be needed */
 pub fn populate_let_for_scope(store_in: TableValue, write_to: TableValue) {
 	store_in.insert(
-		Value::Atom (LET_KEY_STRING.to_string()),
+		Value::Atom(Cow::from(LET_KEY_STRING)),
 		make_let(
 			act_table_set(
-				Value::Table (write_to),
+				Value::Table(write_to),
 				write_to
 			)
 		)
@@ -383,18 +383,18 @@ pub fn table_blank(kind: TableBlankKind) -> TableValue {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum BoxTarget { Package, Object }
 
-pub enum BoxSpec { Populating (BoxTarget, Value) }
+pub enum BoxSpec { Populating(BoxTarget, Value) }
 
 pub fn box_blank(box_kind: BoxSpec, box_parent: Value) -> TableValue {
-	let BoxSpec::Populating (target_type, target_value) = box_kind;
+	let BoxSpec::Populating(target_type, target_value) = box_kind;
     let mut t = table_blank(TableBlankKind::NoLet);
     let mut private_table = table_blank(TableBlankKind::NoLet);
-    let private_value = Value::Table (private_table);
+    let private_value = Value::Table(private_table);
     let target_table = table_from(target_value);
     
-    private_table.insert(value::LET_KEY.clone(), make_let( /* Another fallacious value usage */
+    private_table.insert(value::LET_KEY.to_owned(), make_let( /* Another fallacious value usage */
     	// TODO: currying
-        act_pair_table_set(private_value, private_table, Value::Table (t), t)
+        act_pair_table_set(private_value, private_table, Value::Table(t), t)
     ));
     
     t.insert(Value::LET_KEY.clone(), make_let( /* See objects.md */
@@ -408,28 +408,28 @@ pub fn box_blank(box_kind: BoxSpec, box_parent: Value) -> TableValue {
     ));
     
     if target_type == Package {
-        t.insert(value::EXPORT_LET_KEY.clone(), make_let(act_table_set(target_value, target_table)))
+        t.insert(value::EXPORT_LET_KEY.to_owned(), make_let(act_table_set(target_value, target_table)))
     }
     
-    t.insert(value::THIS_KEY.clone(), target_value);
-    t.insert(value::PARENT_KEY.clone(), box_parent);
-    t.insert(value::CURRENT_KEY.clone(), target_value);
+    t.insert(value::THIS_KEY.to_owned(), target_value);
+    t.insert(value::PARENT_KEY.to_owned(), box_parent);
+    t.insert(value::CURRENT_KEY.to_owned(), target_value);
     /* Access to a private value: */
-    t.insert(value::PRIVATE_KEY.clone(), private_value);
+    t.insert(value::PRIVATE_KEY.to_owned(), private_value);
     t
 }
 
 pub fn table_inheriting(table_kind: TableBlankKind, v: Value) -> TableValue {
 	let mut t = table_blank(table_kind);
-	t.insert(value::PARENT_KEY.clone(), v);
+	t.insert(value::PARENT_KEY.to_owned(), v);
 	t
 }
 
 /* Not used by interpreter, but present for user */
 pub fn raw_rethis_transplant(obj: Value) -> Value {
 	match obj {
-		Value::Closure (c) =>
-			Value::Closure (ClosureValue {this: ClosureThis::Blank, ..c}),
+		Value::Closure(c) =>
+			Value::Closure(ClosureValue {this: ClosureThis::Blank, ..c}),
 		obj => obj,
 	}
 }
@@ -446,9 +446,9 @@ lazy_static! {
 /* Helpers for super function */
 pub fn raw_rethis_super_from(obj: Value, v: Value) -> Value {
 	match v {
-		Value::Closure (c @ ClosureValue {this: ClosureThis::Current (current, _), ..}) =>
-			Value::Closure (ClosureValue {
-				this: ClosureThis::Current (current, obj),
+		Value::Closure(c @ ClosureValue {this: ClosureThis::Current(current, _), ..}) =>
+			Value::Closure(ClosureValue {
+				this: ClosureThis::Current(current, obj),
 				..c
 			}),
 		v => v,
@@ -485,25 +485,23 @@ lazy_static! {
 }
 
 pub fn make_super(current: Value, this: Value) -> ClosureValue {
-	snippet_apply(&Value::Closure (snippet_apply(SUPER_CONSTRUCT, current)), this)
+	snippet_apply(&Value::Closure(snippet_apply(SUPER_CONSTRUCT, current)), this)
 }
 
 pub fn stack_string(stack: &ExecuteStack) -> String {
-	let mut result = "Stack:".to_string();
+	let mut result = "Stack:".to_owned();
 	for frame in stack.iter().rev() {
 		result.push_str("\n\t");
 		result.push_str(match *frame {
-			ExecuteFrame {register: RegisterState::LineStart (..), ref code, ..}
+			ExecuteFrame {register: RegisterState::LineStart(..), ref code, ..}
 			if !code.is_empty() && !code[0].is_empty() =>
 				&code[0][0].at.to_string(),
-			ExecuteFrame {register: RegisterState::FirstValue (_, _, ref at), ..} |
-			ExecuteFrame {register: RegisterState::PairValue (_, _, _, ref at), ..} =>
+			ExecuteFrame {register: RegisterState::FirstValue(_, _, ref at), ..} |
+			ExecuteFrame {register: RegisterState::PairValue(_, _, _, ref at), ..} =>
 				&at.to_string(),
-			ExecuteFrame {ref code, ..}
-			if code.is_empty() =>
+			ExecuteFrame {ref code, ..} if code.is_empty() =>
 				"<empty file>",
-			ExecuteFrame {ref code, ..}
-			if code[0].is_empty() =>
+			ExecuteFrame {ref code, ..} if code[0].is_empty() =>
 				"<lost place>",
 		});
 	}
@@ -516,7 +514,7 @@ pub fn raw_misapply_stack(stack: ExecuteStack, a: &Value, b: &Value) -> Result<(
 
 pub fn make_lazy<F>(table: &mut TableValue, key: Value, func: F) -> Value where
 F: Fn() -> Value {
-	Value::BuiltinUnaryMethod (move |_| { /* Later maybe pass on this to func? */
+	Value::BuiltinUnaryMethod(move |_| { /* Later maybe pass on this to func? */
 		let result = func();
 		table.insert(key, result);
 		result
