@@ -157,42 +157,37 @@ pub struct ExecuteStarter {
 	context: ExecuteContext,
 }
 
-pub static mut ID_GENERATOR: f64 = 0.0;
+pub static mut ID_GENERATOR: usize = 0;
 
 /* "Keywords" */
-pub static HAS_KEY_STRING        : &'static str = "has";
-pub static SET_KEY_STRING        : &'static str = "set";
-pub static LET_KEY_STRING        : &'static str = "let";
-pub static PARENT_KEY_STRING     : &'static str = "parent";
-pub static ID_KEY_STRING         : &'static str = "!id";
-pub static CURRENT_KEY_STRING    : &'static str = "current";
-pub static THIS_KEY_STRING       : &'static str = "this";
-pub static SUPER_KEY_STRING      : &'static str = "super";
-pub static RETURN_KEY_STRING     : &'static str = "return";
-pub static PACKAGE_KEY_STRING    : &'static str = "package";
-pub static PROJECT_KEY_STRING    : &'static str = "project";
-pub static DIRECTORY_KEY_STRING  : &'static str = "directory";
-pub static INTERNAL_KEY_STRING   : &'static str = "internal";
-pub static NONLOCAL_KEY_STRING   : &'static str = "nonlocal";
-pub static PRIVATE_KEY_STRING    : &'static str = "private";
-pub static EXPORT_LET_KEY_STRING : &'static str = "exportLet";
 
-pub static HAS_KEY        : Value = Value::Atom(Cow::Borrowed(HAS_KEY_STRING));
-pub static SET_KEY        : Value = Value::Atom(Cow::Borrowed(SET_KEY_STRING));
-pub static LET_KEY        : Value = Value::Atom(Cow::Borrowed(LET_KEY_STRING));
-pub static PARENT_KEY     : Value = Value::Atom(Cow::Borrowed(PARENT_KEY_STRING));
-pub static ID_KEY         : Value = Value::Atom(Cow::Borrowed(ID_KEY_STRING));
-pub static CURRENT_KEY    : Value = Value::Atom(Cow::Borrowed(CURRENT_KEY_STRING));
-pub static THIS_KEY       : Value = Value::Atom(Cow::Borrowed(THIS_KEY_STRING));
-pub static SUPER_KEY      : Value = Value::Atom(Cow::Borrowed(SUPER_KEY_STRING));
-pub static RETURN_KEY     : Value = Value::Atom(Cow::Borrowed(RETURN_KEY_STRING));
-pub static PACKAGE_KEY    : Value = Value::Atom(Cow::Borrowed(PACKAGE_KEY_STRING));
-pub static PROJECT_KEY    : Value = Value::Atom(Cow::Borrowed(PROJECT_KEY_STRING));
-pub static DIRECTORY_KEY  : Value = Value::Atom(Cow::Borrowed(DIRECTORY_KEY_STRING));
-pub static INTERNAL_KEY   : Value = Value::Atom(Cow::Borrowed(INTERNAL_KEY_STRING));
-pub static NONLOCAL_KEY   : Value = Value::Atom(Cow::Borrowed(NONLOCAL_KEY_STRING));
-pub static PRIVATE_KEY    : Value = Value::Atom(Cow::Borrowed(PRIVATE_KEY_STRING));
-pub static EXPORT_LET_KEY : Value = Value::Atom(Cow::Borrowed(EXPORT_LET_KEY_STRING));
+macro_rules! keywords {
+	($($name:ident, $name_string:ident = $s:expr;)*) => {
+		$(
+			pub static $name_string : &'static str = $s;
+			pub static $name : Value = Value::Atom(Cow::Borrowed($name_string));
+		)*
+	};
+}
+
+keywords! {
+	HAS_KEY,        HAS_KEY_STRING        = "has";
+	SET_KEY,        SET_KEY_STRING        = "set";
+	LET_KEY,        LET_KEY_STRING        = "let";
+	PARENT_KEY,     PARENT_KEY_STRING     = "parent";
+	ID_KEY,         ID_KEY_STRING         = "!id";
+	CURRENT_KEY,    CURRENT_KEY_STRING    = "current";
+	THIS_KEY,       THIS_KEY_STRING       = "this";
+	SUPER_KEY,      SUPER_KEY_STRING      = "super";
+	RETURN_KEY,     RETURN_KEY_STRING     = "return";
+	PACKAGE_KEY,    PACKAGE_KEY_STRING    = "package";
+	PROJECT_KEY,    PROJECT_KEY_STRING    = "project";
+	DIRECTORY_KEY,  DIRECTORY_KEY_STRING  = "directory";
+	INTERNAL_KEY,   INTERNAL_KEY_STRING   = "internal";
+	NONLOCAL_KEY,   NONLOCAL_KEY_STRING   = "nonlocal";
+	PRIVATE_KEY,    PRIVATE_KEY_STRING    = "private";
+	EXPORT_LET_KEY, EXPORT_LET_KEY_STRING = "exportLet";
+}
 
 // Really needed?
 pub fn table_set_option(table: &mut TableValue, key: Value, value: Option<Value>) {

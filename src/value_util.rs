@@ -39,11 +39,11 @@ pub fn bool_cast(v: bool) -> Value {
 /* Create a closure from a function */
 
 pub fn snippet_closure<F: Fn(Vec<Value>) -> Value>(arg_count: usize, exec: F) -> Value {
-	Value::Closure (ClosureValue {
-		exec: ClosureExec::Builtin (exec),
+	Value::Closure(ClosureValue {
+		exec: ClosureExec::Builtin(exec),
 		need_args: arg_count,
 		bound: vec![],
-		this: ClosureThis::Never
+		this: ClosureThis::Never,
 	})
 }
 
@@ -51,8 +51,8 @@ pub fn snippet_closure<F: Fn(Vec<Value>) -> Value>(arg_count: usize, exec: F) ->
 pub fn seal_table(t: &mut TableValue) {
 	if options::RUN.track_objects {
 		unsafe {
-			ID_GENERATOR += 1.0;
-			t.insert(value::ID_KEY.clone(), Value::Float (ID_GENERATOR));
+			ID_GENERATOR += 1;
+			t.insert(value::ID_KEY.clone(), Value::Float(ID_GENERATOR as f64));
 		}
 	}
 }
@@ -121,7 +121,7 @@ pub fn snippet_apply(closure: &Value, val: Value) -> ClosureValue {
 lazy_static! {
 	/* Ternary function without short-circuiting... */
 	/* internal.tern exposes this */
-	pub static ref RAW_TERN: Value = snippet_closure(3, |args| match &*args {
+	pub static ref RAW_TERN: Value = snippet_closure(3, |args| match *args {
 		[Value::Null, _, v] => v,
 		[_, v, _] => v,
 		_ => impossible_arg("RAW_TERN"),
@@ -175,14 +175,14 @@ pub fn raw_rethis_assign_object(mut v: Value) -> Value {
 lazy_static! {
 	/* Emily versions of the above two */
 	pub static ref RETHIS_ASSIGN_OBJECT_DEFINITION: Value = snippet_closure(2, |args|
-		match &*args {
+		match *args {
 			[obj, a] => raw_rethis_assign_object_definition(obj, a),
 			_ => impossible_arg("RETHIS_ASSIGN_OBJECT_DEFINITION")
 		}
 	);
 
 	pub static ref RETHIS_ASSIGN_OBJECT: Value = snippet_closure(1, |args|
-		match &*args {
+		match *args {
 			[a] => raw_rethis_assign_object(a),
 			_ => impossible_arg("RETHIS_ASSIGN_OBJECT"),
 		}
@@ -218,8 +218,9 @@ pub fn act_pair_table_set(t1v: Value, t1: TableValue, t2v: Value, t2: TableValue
 
 lazy_static! {
 	/* Most tables need to be prepopulated with a "has". Here's the has tester for a singular table: */
-	pub static ref RAW_HAS: Value = snippet_closure(2, |args| match &*args {
-		[Value::Table(t), key] | [Value::Object(t), key] =>
+	pub static ref RAW_HAS: Value = snippet_closure(2, |args| match *args {
+		[Value::Table(ref t), key]
+		| [Value::Object(ref t), key] =>
 			bool_cast(t.contains_key(key)),
 		
 		[v, _] => bad_arg_table("RAW_HAS", v),
@@ -249,8 +250,9 @@ pub fn make_has(obj: Value) -> ClosureValue {
 
 lazy_static! {
 	/* Most tables need to be prepopulated with a "set". Here's the setter for a singular table: */
-	pub static ref RAW_SET: Value = snippet_closure(3, |args| match &*args { /* TODO: Unify with make_let? */
-		[tv @ Value::Table (t), key, value] | [tv @ Value::Object (t), key, value] => {
+	pub static ref RAW_SET: Value = snippet_closure(3, |args| match *args { /* TODO: Unify with make_let? */
+		[tv @ Value::Table(t), key, value]
+		| [tv @ Value::Object(t), key, value] => {
 			act_table_set(tv, t, key, value);
 			Value::Null
 		}
@@ -307,7 +309,7 @@ pub fn make_object_set(obj: Value) -> ClosureValue {
 /* Many tables need to be prepopulated with a "let". Here's the let setter for a singular table: */
 /* TODO: Don't 'make' like this? */
 pub fn make_let<F: Fn(Value, Value)>(action: F) -> Value {
-	snippet_closure(2, |args| match &*args {
+	snippet_closure(2, |args| match *args {
 		[key, value] => {
 			action(key, value);
 			Value::Null
@@ -436,7 +438,7 @@ pub fn raw_rethis_transplant(obj: Value) -> Value {
 
 lazy_static! {
 	pub static ref RETHIS_TRANSPLANT: Value = snippet_closure(1, |args|
-		match &*args {
+		match *args {
 			[ref mut obj] => raw_rethis_transplant(obj),
 			_ => impossible_arg("RETHIS_TRANSPLANT")
 		}
@@ -457,14 +459,14 @@ pub fn raw_rethis_super_from(obj: Value, v: Value) -> Value {
 
 lazy_static! {
 	pub static ref RETHIS_SUPER_FROM: Value = snippet_closure(2, |args|
-		match &*args {
+		match *args {
 			[obj, a] => raw_rethis_super_from(obj, a),
 			_ => impossible_arg("RETHIS_SUPER_FROM")
 		}
 	);
 
 	pub static ref MISAPPLY_ARG: Value = snippet_closure(2, |args|
-		match &*args {
+		match *args {
 			[a, b] => raw_misapply_arg(a, b),
 			_ => impossible_arg("MISAPPLY_ARG")
 		}
@@ -490,6 +492,7 @@ pub fn make_super(current: Value, this: Value) -> ClosureValue {
 
 pub fn stack_string(stack: &ExecuteStack) -> String {
 	let mut result = "Stack:".to_owned();
+	
 	for frame in stack.iter().rev() {
 		result.push_str("\n\t");
 		result.push_str(match *frame {
