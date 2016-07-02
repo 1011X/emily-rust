@@ -31,29 +31,6 @@ fn arg_plus_limitations(who: &'static str) -> Result<(), ocaml::Failure> {
 	ocaml::failwith(format!("Internal error: Called {} with an arg spec it was not designed to handle.", who))
 }
 
-/* Takes the rule list normally given as first argument to Arg.parse and parses env vars against it. */
-pub fn env_parse(arg: Vec<(arg::Key, arg::Spec, arg::Doc)>) -> Result<(), ocaml::Failure> {
-	for (key, spec, _) in arg {
-		/* Rather than iterating env, iterate the rule list and check for each env we recognize */
-		let value = match env::var(key) { /* May fail */
-			Ok(v) => v,
-			Err(_) => continue, /* env::var failed, which means the env var wasn't present. Move on */
-		};
-		
-		match spec {
-			/* Discard argument-- does this ever even make sense? */
-			Spec::Unit(f) => f(),
-
-			/* String argument */
-			Spec::String(f) => f(value),
-
-			/* Incorrect use of ArgParse */
-			_ => return arg_plus_limitations("env_parse"),
-		}
-	}
-	Ok(())
-}
-
 /* Notice one additional argument vs Arg.parse, called after successful completion with unprocessed part of arg list (possibly empty) */
 pub fn arg_parse<F, G>(rules: Vec<(arg::Key, arg::Spec, arg::Doc)>, fallback: F, usage: String, on_complete: G) where
 F: Fn(String) -> Result<(), Error>,

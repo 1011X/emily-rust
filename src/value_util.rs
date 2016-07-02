@@ -38,9 +38,9 @@ pub fn bool_cast(v: bool) -> Value {
 
 /* Create a closure from a function */
 
-pub fn snippet_closure<F: Fn(Vec<Value>) -> Value>(arg_count: usize, exec: F) -> Value {
+pub fn snippet_closure(arg_count: usize, exec: Box<Fn(Vec<Value>) -> Value>) -> Value {
 	Value::Closure(ClosureValue {
-		exec: ClosureExec::Builtin(exec),
+		exec: ClosureExec::Builtin(box exec),
 		need_args: arg_count,
 		bound: vec![],
 		this: ClosureThis::Never,

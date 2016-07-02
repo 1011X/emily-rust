@@ -9,12 +9,12 @@ pub type TableValue = HashMap<Value, Value>;
 /* Closure types: */
 #[derive(Clone)]
 pub struct ClosureExecUser {
-	body: token::CodeSequence,
-	scoped: bool,             /* Should the closure execution get its own let scope? */
-	env_scope: Value,         /* Captured scope environment of closure manufacture */
+	body      : token::CodeSequence,
+	scoped    : bool,  /* Should the closure execution get its own let scope? */
+	env_scope : Value, /* Captured scope environment of closure manufacture */
 	/* Another option would be to make the "new" scope early & excise 'key': */
-	key: Vec<String>,         /* Not-yet-curried keys, or [] as special for "this is nullary" -- BACKWARD, first-applied key is last */
-	has_return: bool          /* Should the closure execution get its own "return" continuation? */
+	key       : Vec<String>, /* Not-yet-curried keys, or [] as special for "this is nullary" -- BACKWARD, first-applied key is last */
+	has_return: bool,  /* Should the closure execution get its own "return" continuation? */
 }
 
 #[derive(Clone)]
@@ -48,17 +48,15 @@ pub enum Value<'a> {
 	Atom(Cow<'a, str>),
 
 	/* Hack types for builtins */ /* FIXME: Can some of these be deprecated? */
-	BuiltinFunction            (Box<Fn(Value) -> Value>), /* function argument = result */
-	BuiltinUnaryMethod         (Box<Fn(Value) -> Value>), /* function self = result */
-	BuiltinMethod (Box<Fn(Value) -> Fn(Value) -> Value>), /* function self argument = result */
+	BuiltinFunction           (Box<Fn(Value) -> Value>), /* function argument = result */
+	BuiltinUnaryMethod        (Box<Fn(Value) -> Value>), /* function self = result */
+	BuiltinMethod(Box<Fn(Value) -> Fn(Value) -> Value>), /* function self argument = result */
 	BuiltinHandoff (Box<Fn(ExecuteContext) -> Fn(ExecuteStack) -> Fn(Value, token::CodePosition) -> Value>), /* Take control of interpreter */
 
     /* Complex user-created values */
     
 	/* Is this getting kind of complicated? Should curry be wrapped closures? Should callcc be separate? */
 	
-	// XXX Note to self: STOP TRYING TO INTEGRATE ClosureValue INTO Value!!!
-	// It's more convenient if you just... don't.
 	Closure(ClosureValue),
 	UserMethod(Box<Value>),
 	Table(TableValue),
@@ -67,12 +65,16 @@ pub enum Value<'a> {
 }
 
 // Used for implementing OCaml's equality rules
-// Note: PartialEq should NOT be implemented like this. This is just temporary. Maybe.
+// Note: PartialEq should not be implemented like this. This is just temporary. Maybe.
 impl PartialEq for Value {
 	fn eq(&self, other: &Value) -> bool {
 		match (self, other) {
-			(&Value::Null, &Value::Null) |
-			(&Value::True, &Value::True) => true,
+			(&Value::Null, &Value::Null)
+			| (&Value::True, &Value::True)
+				=> true,
+			
+			(&Value::Float(f1), &Value::Float(f2)) if f1.is_nan() && f2.is_nan()
+				=> true,
 			
 			_ => self as *const Value == other as *const Value,
 		}
@@ -82,7 +84,18 @@ impl PartialEq for Value {
 impl Hash for Value {
 	fn hash<H: Hasher>(&self, hasher: &mut H) {
 		// TODO: implement
-		unimplemented!()
+		match self {
+			Value::Null => hasher.write_u8(0),
+			Value::True => hasher.write_u8(1),
+			Value::Float(f) => {
+				hasher.write_u8(2);
+				hasher.write_u64(f as u64);
+			}
+			Value::String(ref s) => {
+				hasher.write_u8(3);
+				
+			}
+		}
 	}
 }
 
