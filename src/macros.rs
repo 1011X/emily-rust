@@ -1,12 +1,23 @@
 /* Macro processing */
 use std::collections::HashMap;
 use std::sync::{Once, ONCE_INIT};
+use std::borrow::Cow;
 
 use ocaml;
+use pretty;
+use value;
+use options;
 use token::{
+	self,
+	CodePosition,
+	CodeSource,
+	Token,
     TokenContents,
     TokenClosureKind,
-    TokenGroupKind
+    TokenGroup,
+    TokenGroupKind,
+    
+    CompilationError,
 };
 
 pub fn fail_at(at: &CodePosition, mesg: &str) -> Result<(), token::CompilationError> {
@@ -67,11 +78,11 @@ lazy_static! {
 
 /* All manufactured tokens should be made through clone, so that position information is retained */
 pub fn clone_atom(at: &CodePosition, s: &str) -> Token {
-    token::clone(at, &TokenContents::Atom(Cow::Borrowed(s)))
+    token::clone(at, &TokenContents::Atom(Cow::from(s)))
 }
 
 pub fn clone_word(at: &CodePosition, s: &str) -> Token {
-    token::clone(at, &TokenContents::Word(Cow::Borrowed(s)))
+    token::clone(at, &TokenContents::Word(Cow::from(s)))
 }
 
 pub fn clone_group(at: &CodePosition) -> Token {
@@ -102,14 +113,17 @@ pub fn process(l: SingleLine) -> SingleLine {
     }
 
     /* Search for macro to process next. Priority None/line None means none known yet. */
-    fn find_ideal(best_priority: Option<MacroPriority>, best_line: SingleLine, past: SingleLine, present: Token, future: SingleLine) -> Option<MacroMatch> {
+    fn find_ideal(best_priority: Option<MacroPriority>, best_line: Option<SingleLine>, mut past: SingleLine, present: Token, future: &[Token]) -> Option<MacroMatch> {
         /* Iterate cursor */
-        let proceed = |priority, line| match &*future {
+        let proceed = |priority, line| match *future {
             /* Future is empty, so future has iterated to end of line */
             [] => line,
 
             /* Future is nonempty, so move the cursor forward. */
-            [next_future.., next_token] => find_ideal(priority, line, past.into_iter().chain(vec![present]).collect(), next_token, next_future),
+            [ref next_future.., next_token] => {
+                past.push(present);
+                find_ideal(priority, line, past, next_token, next_future)
+            }
         };
 
         /* Iterate cursor leaving priority and line unchanged */
@@ -118,8 +132,8 @@ pub fn process(l: SingleLine) -> SingleLine {
         /* Investigate token under cursor */
         match present.contents {
             /* Words or symbols can currently be triggers for macros. */
-            TokenContents::Word(s)
-            | TokenContents::Symbol(s) => match MACRO_TABLE.get(&s) { /* Is the current word/symbol a thing in the macro table? */
+            TokenContents::Word(ref s)
+            | TokenContents::Symbol(ref s) => match MACRO_TABLE.get(s) { /* Is the current word/symbol a thing in the macro table? */
                 /* It's in the table; now to decide if it's an ideal match. */
                 Some(&MacroSpec {priority, spec_function}) => {
                     /* True if this macro is better fit than the current candidate. */
@@ -129,21 +143,25 @@ pub fn process(l: SingleLine) -> SingleLine {
 
                         /* If associativity varies, we can determine winner based on that alone: */
                         /* Prefer higher priority, but break ties toward left-first macros over right-first ones. */
-                        (Some(L(left)), R(right)) => left < right,
-                        (Some(R(left)), L(right)) => left <= right,
+                        (Some(MacroPriority::L(left)), MacroPriority::R(right)) =>
+                        	left < right,
+                        (Some(MacroPriority::R(left)), MacroPriority::L(right)) =>
+                        	left <= right,
 
                         /* "Process leftmost first": Prefer higher priority, break ties to the left. */
-                        (Some(L(left)), L(right)) => left < right,
+                        (Some(MacroPriority::L(left)), MacroPriority::L(right)) =>
+                        	left < right,
 
                         /* "Process rightmost first": Prefer higher priority, break ties to the right. */
-                        (Some(R(left)), R(right)) => left <= right,
+                        (Some(MacroPriority::R(left)), MacroPriority::R(right)) =>
+                        	left <= right,
                     };
                     
                     if better {
                         proceed(Some(priority), Some(MacroMatch {
-                        	past,
-                        	present,
-                        	future,
+                        	past: past,
+                        	present: present,
+                        	future: future.to_vec(),
                         	match_function: spec_function,
                         }));
                     }
@@ -153,7 +171,7 @@ pub fn process(l: SingleLine) -> SingleLine {
                 	}
                 }
                 /* It's not in the table. */
-                _ => skip(),
+                _ => skip()
             },
             
             /* It's not even a candidate to trigger a macro. */
@@ -162,22 +180,23 @@ pub fn process(l: SingleLine) -> SingleLine {
     }
 
     /* Actually process macro */
-    match &*l {
+    match *l {
         /* Special case: Line is empty, do nothing. */
-        l @ [] => l.to_vec(),
+        [] => Vec::new(),
 
         /* Split out first item to use as the find_ideal "present" cursor. */
-        [future.., present] =>
+        [ref future.., present] =>
             /* Repeatedly run find_ideal until there are no more macros in the line. */
             match find_ideal(None, None, vec![], present, future.to_vec()) {
                 /* No macros triggered! Sanitize the line and return it. */
                 None => verify_symbols(l),
 
                 /* A macro was found. Run the macro, then re-process the adjusted line. */
-                Some (MacroMatch {match_function, past, present, future}) => {
+                Some(MacroMatch {match_function, past, present, future}) => {
                     if options::RUN.step_macro {
                     	println!("    ...becomes:");
                     }
+                    
                     process(match_function(past, present, future))
                 }
             },
@@ -298,25 +317,28 @@ pub fn backtick(past: SingleLine, at: &CodePosition, future: SingleLine) -> Sing
 }
 
 /* Works like ocaml @@ or haskell $ */
-pub fn question(past: SingleLine, at: &CodePosition, future: SingleLine) -> SingleLine {
+pub fn question(mut past: SingleLine, at: &CodePosition, mut future: SingleLine) -> SingleLine {
     let mut a = vec![];
-    let mut rest = &*future;
     
     loop {
-        match rest {
-            [more_rest.., ref colon_at @ Token {contents: TokenContents::Symbol(Cow::Borrowed(":")), ..}] => return Ok(vec![
-				clone_word(at, "tern".to_string()),
-				new_future(at, past.into_iter().rev().collect()),
-				new_future_closure(at, a.into_iter().rev().collect()),
-				new_future_closure(colon_at, more_rest.to_vec())
-			]),
+        match *future {
+            [ref more_rest.., ref colon_at @ Token {contents: TokenContents::Symbol(Cow::Borrowed(":")), ..}] => {
+                past.rev();
+                a.rev();
+                return Ok(vec![
+				    clone_word(at, "tern".to_owned()),
+				    new_future(at, past),
+				    new_future_closure(at, a),
+				    new_future_closure(colon_at, more_rest.to_vec())
+			    ]);
+		    }
                 
-            [more_rest.., Token {contents: TokenContents::Symbol(Cow::Borrowed("?")), ..}] =>
+            [ref more_rest.., Token {contents: TokenContents::Symbol(Cow::Borrowed("?")), ..}] =>
                 return Err(token::fail_token(at, "Nesting like ? ? : : is not allowed.")),
             
-            [more_rest.., token] => {
+            [ref more_rest.., token] => {
             	a.push(token);
-            	rest = more_rest;
+            	future = more_rest.to_vec();
             }
             
             [] => return Err(token::fail_token(at, ": expected somewhere to right of ?")),
@@ -326,15 +348,15 @@ pub fn question(past: SingleLine, at: &CodePosition, future: SingleLine) -> Sing
 
 /* Works like Perl // */
 pub fn ifndef(past: SingleLine, at: &CodePosition, future: SingleLine) -> Result<SingleLine, CompilationError> {
-    let (target, key) = match &*past {
-        [ref token @ Token {contents: TokenContents::Word(name), ..}] =>
-        	(clone_word(at, "scope"), clone_atom(token, &name)),
+    let (target, key) = match *past {
+        [ref token @ Token {contents: TokenContents::Word(ref name), ..}] =>
+        	(clone_word(at, "scope"), clone_atom(token, name)),
     	
         [left] =>
         	return Err(token::fail_token(left, "Either a variable name or a field access is expected to left of //").unwrap_err()),
     	
-        [more_tokens.., token] =>
-        	(new_past(at, moreTokens), token),
+        [ref more_tokens.., token] =>
+        	(new_past(at, more_tokens), token),
     	
         [] => return Err(token::fail_token(at, "Nothing found to left of // operator").unwrap_err()),
     };
@@ -361,7 +383,7 @@ pub fn assignment(past: SingleLine, at: &CodePosition, future: SingleLine) -> Si
             Some(bindings) => token::clone_group(
             	at,
             	TokenClosureKind::ClosureWithBinding (true, bindings.into_iter().rev().collect()),
-            	TokenScopeKind::Plain,
+            	TokenGroupKind::Plain,
             	vec![],
             	vec![process(future)]
             ),
@@ -371,20 +393,20 @@ pub fn assignment(past: SingleLine, at: &CodePosition, future: SingleLine) -> Si
         /* TODO: This is all wrong... set should be default, let should be the extension.
            However this will require... something to allow [] to work right. */
         let mut cmd_at = at;
-        let mut cmd = "let".to_string();
+        let mut cmd = "let".to_owned();
         let mut lookups = lookups;
         // CodePosition -> String -> SingleLine -> Result<SingleLine, CompilationError>
         let result_for_command = |cmd_at, cmd, lookups| loop {
         	
             /* Done with bindings now, just have to figure out what we're assigning to */
-            match (&*lookups, &*cmd) {
+            match (*lookups, *cmd) {
                 /* ...Nothing? */
                 ([], _) => return Err(token::fail_token(at, "Found a =, but nothing to assign to.").unwrap_err()),
 
                 /* Sorta awkward, detect the "nonlocal" prefix and swap out let. This should be generalized. */
-                ([more_lookups.., cmd_token @ Token {contents: TokenContents::Word(Cow::Borrowed("nonlocal")), ..}], "let") => {
+                ([ref more_lookups.., cmd_token @ Token {contents: TokenContents::Word(Cow::Borrowed("nonlocal")), ..}], "let") => {
                 	cmd_at = cmd_token;
-                	cmd = value::SET_KEY_STRING.to_string();
+                	cmd = value::SET_KEY_STRING.to_owned();
                 	lookups = more_lookups.to_vec();
             	}
 
@@ -402,9 +424,9 @@ pub fn assignment(past: SingleLine, at: &CodePosition, future: SingleLine) -> Si
                 ]),
 
                 /* Looks like a b ... = c */
-                ([more_lookups.., first_token], _) => match &*more_lookups {
+                ([ref more_lookups.., first_token], _) => match *more_lookups {
                     /* Note what's happening here: We're slicing off the FINAL element, first in the reversed list. */
-                    [middle_lookups.., final_token] => vec![
+                    [ref middle_lookups.., final_token] => vec![
                     	vec![first_token],
                     	middle_lookups.into_iter().rev().collect(),
                     	vec![clone_atom(cmd_at, cmd), final_token, rightside]
@@ -416,18 +438,18 @@ pub fn assignment(past: SingleLine, at: &CodePosition, future: SingleLine) -> Si
             }
         };
 
-        result_for_command(at, "let".to_string(), lookups)
+        result_for_command(at, "let".to_owned(), lookups)
     };
 
     /* Parsing loop, build the lookups and bindings list */
     fn process_left(remaining_left: SingleLine, lookups: SingleLine, bindings: Option<Vec<String>>) -> SingleLine {
-        match (remaining_left, bindings) {
+        match (*remaining_left, bindings) {
             /* If we see a ^, switch to loading bindings */
-            ([Token {contents: TokenContents::Symbol(Cow::Borrowed("^")), ..}, more_left..], None) =>
+            ([Token {contents: TokenContents::Symbol(Cow::Borrowed("^")), ..}, ref more_left..], None) =>
                 process_left(more_left, lookups, Some(vec![])),
 
             /* If we're already loading bindings, just skip it */
-            ([Token {contents: TokenContents::Symbol(Cow::Borrowed("^")), ..}, more_left..], _) =>
+            ([Token {contents: TokenContents::Symbol(Cow::Borrowed("^")), ..}, ref more_left..], _) =>
                 process_left(more_left, lookups, bindings),
 
             /* Sanitize any symbols that aren't cleared for the left side of an = */
@@ -435,11 +457,11 @@ pub fn assignment(past: SingleLine, at: &CodePosition, future: SingleLine) -> Si
             	ocaml::failwith(&format!("Unexpected symbol {} to left of = ", x)),
 
             /* We're adding bindings */
-            ([Token {contents: TokenContents::Word(ref b), ..}, rest_past..], Some(bindings)) =>
+            ([Token {contents: TokenContents::Word(ref b), ..}, ref rest_past..], Some(bindings)) =>
                 process_left(rest_past, lookups, Some(bindings.into_iter().chain(vec![b]).collect())),
 
             /* We're adding lookups */
-            ([l, rest_past..], None) =>
+            ([l, ref rest_past..], None) =>
                 process_left(rest_past, lookups.into_iter().chain(vec![l]).collect(), None),
 
             /* There is no more past, Jump to result. */
@@ -458,19 +480,20 @@ pub fn closure_construct(with_return: bool) -> MacroFunction {
     box move |past, at, future| {
         /* Scan line picking up bindings until group reached. */
         fn open_closure(bindings: Vec<String>, future: SingleLine) -> SingleLine {
-            match &*future {
+            match *future {
                 /* If redundant ^s seen, skip them. */
-                [Token {contents: TokenContents::Symbol(Cow::Borrowed("^")), ..}, more_future..] =>
+                [Token {contents: TokenContents::Symbol(Cow::Borrowed("^")), ..}, ref more_future..] =>
                     open_closure(bindings, more_future.to_vec()),
 
                 /* This is a binding, add to list. */
-                [Token {contents: TokenContents::Word(ref b), ..}, more_future..] =>
+                [Token {contents: TokenContents::Word(ref b), ..}, ref more_future..] =>
                     open_closure(bindings.into_iter().chain(vec![b]).collect(), more_future),
 
                 /* This is a group, we are done now. */
-                [Token {contents: TokenContents::Group(TokenGroup {closure: TokenClosureKind::NonClosure, kind, group_initializer, items}), ..}, more_future..] => match kind {
+                [Token {contents: TokenContents::Group(TokenGroup {closure: TokenClosureKind::NonClosure, kind, group_initializer, items}), ..}, ref more_future..] => match kind {
                         /* They asked for ^[], unsupported. */
-                        TokenGroupKind::Box(_) => token::fail_token(at, "Can't use object literal with ^"),
+                        TokenGroupKind::Box(_) =>
+                        	token::fail_token(at, "Can't use object literal with ^"),
                         /* Supported group */
                         _ => arrange_token(at, past, token::clone_group(at, TokenClosureKind::ClosureWithBinding(with_return, bindings.into_iter().rev().collect()), kind, group_initializer, items), more_future.to_vec()),
                 },
@@ -482,6 +505,44 @@ pub fn closure_construct(with_return: bool) -> MacroFunction {
                 _ => token::fail_token(at, "Unexpected symbol after ^"),
             }
         }
+        
+        // TODO:
+        let open_closure = |bindings, mut future| loop {
+        	match *future {
+                /* If redundant ^s seen, skip them. */
+                [Token {contents: TokenContents::Symbol(Cow::Borrowed("^")), ..}, ref more_future..] =>
+                	future = more_future.to_vec(),
+
+                /* This is a binding, add to list. */
+                [Token {contents: TokenContents::Word(ref b), ..}, ref more_future..] =>
+                	bindings.push(b),
+
+                /* This is a group, we are done now. */
+                [Token {
+                	contents: TokenContents::Group(TokenGroup {
+                		closure: TokenClosureKind::NonClosure,
+                		kind,
+                		group_initializer,
+                		items
+            		}), ..
+        		}, ref mut more_future..] => match kind {
+                        /* They asked for ^[], unsupported. */
+                        TokenGroupKind::Box(_) =>
+                        	return token::fail_token(at, "Can't use object literal with ^"),
+                        /* Supported group */
+                        _ => {
+                            bindings.rev();
+                        	return Ok(arrange_token(at, past, token::clone_group(at, TokenClosureKind::ClosureWithBinding(with_return, bindings), kind, group_initializer, items), more_future.to_vec()));
+                        }
+                },
+
+                /* Reached end of line */
+                [] => return token::fail_token(at, "Body missing for closure"),
+
+                /* Any other symbol */
+                _ => return token::fail_token(at, "Unexpected symbol after ^"),
+            }
+        };
 
         open_closure(vec![], future)
     }
@@ -494,29 +555,29 @@ pub fn comma(past: SingleLine, at: CodePosition, future: SingleLine) -> SingleLi
     fn gather(accumulate_line: SingleLine, accumulate_all: Vec<SingleLine>, future: SingleLine) -> Vec<SingleLine> {
         /* A new value for accumulateLine */
         let push_line = || accumulate_all.into_iter().chain(vec![accumulate_line]).collect::<Vec<_>>();
-        match &*future {
+        match *future {
             /* Finished */
             [] => push_line(),
             
             /* Another comma was found, open a new section */
-            [Token {contents: TokenContents::Symbol (","), ..}, more_future..] =>
+            [Token {contents: TokenContents::Symbol (","), ..}, ref more_future..] =>
             	gather(vec![], push_line(), more_future.to_vec()),
         	
             /* Add token to current section */
-            [t, more_future..] => gather(accumulate_line.into_iter().chain(vec![t]).collect(), accumulate_all, more_future.to_vec()),
+            [t, ref more_future..] => gather(accumulate_line.into_iter().chain(vec![t]).collect(), accumulate_all, more_future.to_vec()),
         }
     }
     /* Given reverse list of reverse-list-of-tokens, create a list of this.append statements */
     fn emit(accumulate_final: SingleLine, sub_lines: Vec<SingleLine>) -> SingleLine {
-        match &*sub_lines {
+        match *sub_lines {
             /* Finished */
             [] => accumulate_final,
 
             /* Blank line-- ignore it */
-            [[], more_lines..] => emit(accumulate_final, more_lines.to_vec()),
+            [[], ref more_lines..] => emit(accumulate_final, more_lines.to_vec()),
             
             /* Nonempty line-- wrap TOKENS into this.append(TOKENS); */
-            [tokens @ [first_token, more_tokens..], more_lines] => emit(
+            [tokens @ [first_token, ref more_tokens..], ref more_lines..] => emit(
                 accumulate_final.into_iter().chain(vec![vec![
                 	clone_word(first_token, "this".to_string()),
                 	clone_atom(first_token, "append".to_string()),
@@ -532,9 +593,9 @@ pub fn comma(past: SingleLine, at: CodePosition, future: SingleLine) -> SingleLi
 
 /* Atom */
 pub fn atom(past: SingleLine, at: CodePosition, future: SingleLine) -> SingleLine {
-    match &*future {
+    match *future {
         /* Look at next token and nothing else. */
-        [Token {contents: TokenContents::Word(ref a), ..}, more_future..] =>
+        [Token {contents: TokenContents::Word(ref a), ..}, ref more_future..] =>
             arrange_token(at, past, clone_atom(at, a), more_future.to_vec()),
         _ => token::fail_token(at, "Expected identifier after ."),
     }
@@ -546,7 +607,7 @@ pub fn make_dual_mode_splitter(unary_atom: String, binary_atom: String) -> Macro
 		let prefix_unary = make_unary(unary_atom);
 		let splitter = make_splitter(binary_atom);
 		
-		match &*past {
+		match *past {
 		    [] => prefix_unary(past, at, future),
 		    
 		    [Token {contents: TokenContents::Symbol(ref s), ..}, ..]
@@ -588,44 +649,44 @@ lazy_static! {
 	= vec![
 		/* Weird grouping */
 
-		(R(20.), "`", backtick),
+		(MacroPriority::R(20.), "`", backtick),
 
 		/* More boolean */
-		(R(30.), "!", make_prefix_unary("not")),
+		(MacroPriority::R(30.), "!", make_prefix_unary("not")),
 
 		/* Math */
-		(R(30.), "~", make_unary("negate")),
-		(R(40.), "/", make_splitter("divide")),
-		(R(40.), "*", make_splitter("times")),
-		(R(40.), "%", make_splitter("mod")),
-		(R(50.), "-", make_dual_mode_splitter("negate", "minus")),
-		(R(50.), "+", make_splitter("plus")),
+		(MacroPriority::R(30.), "~", make_unary("negate")),
+		(MacroPriority::R(40.), "/", make_splitter("divide")),
+		(MacroPriority::R(40.), "*", make_splitter("times")),
+		(MacroPriority::R(40.), "%", make_splitter("mod")),
+		(MacroPriority::R(50.), "-", make_dual_mode_splitter("negate", "minus")),
+		(MacroPriority::R(50.), "+", make_splitter("plus")),
 
 		/* Comparators */
-		(R(60.), "<", make_splitter("lt")),
-		(R(60.), "<=", make_splitter("lte")),
-		(R(60.), ">", make_splitter("gt")),
-		(R(60.), ">=", make_splitter("gte")),
+		(MacroPriority::R(60.), "<", make_splitter("lt")),
+		(MacroPriority::R(60.), "<=", make_splitter("lte")),
+		(MacroPriority::R(60.), ">", make_splitter("gt")),
+		(MacroPriority::R(60.), ">=", make_splitter("gte")),
 
-		(R(65.), "==", make_splitter("eq")),
-		(R(65.), "!=", make_splitter_invert("eq")),
+		(MacroPriority::R(65.), "==", make_splitter("eq")),
+		(MacroPriority::R(65.), "!=", make_splitter_invert("eq")),
 
 		/* Boolean */
-		(R(70.), "&&", make_short_circuit("and")),
-		(R(75.), "||", make_short_circuit("or")),
-		(R(77.), "%%", make_short_circuit("xor")),
+		(MacroPriority::R(70.), "&&", make_short_circuit("and")),
+		(MacroPriority::R(75.), "||", make_short_circuit("or")),
+		(MacroPriority::R(77.), "%%", make_short_circuit("xor")),
 
 		/* Grouping */ /* FIXME: Would these make more sense after assignment? */
-		(L(90.), ":", apply_right),
-		(L(90.), "?", question),
+		(MacroPriority::L(90.), ":", apply_right),
+		(MacroPriority::L(90.), "?", question),
 
 		/* Core */
-		(L(100.), "^",  closure_construct(false)),
-		(L(100.), "^@", closure_construct(true)),
-		(L(105.), "=",  assignment),
-		(L(110.), ".",  atom),
+		(MacroPriority::L(100.), "^",  closure_construct(false)),
+		(MacroPriority::L(100.), "^@", closure_construct(true)),
+		(MacroPriority::L(105.), "=",  assignment),
+		(MacroPriority::L(110.), ".",  atom),
 
 		/* Pseudo-statement */
-		(L(150.), ",", comma),
+		(MacroPriority::L(150.), ",", comma),
 	];
 }

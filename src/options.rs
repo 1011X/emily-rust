@@ -7,6 +7,8 @@ use std::ffi::OsString;
 use std::path::PathBuf;
 use std::sync::{Once, ONCE_INIT};
 
+use getopts::Options;
+
 //use arg_plus;
 
 pub enum ExecutionTarget {
@@ -58,7 +60,7 @@ lazy_static! {
 		print_project: false,
 	};
 }
-
+/*
 fn key_mutate_argument(arg: Vec<([&'static str; 2], Spec, String)>) -> Vec<(Vec<arg::Key>, arg::Spec, arg::Doc)> {
 	arg_plus::key_mutate(|l| format!("--{}", l.join("-")), arg)
 }
@@ -70,7 +72,7 @@ fn key_mutate_environment(arg: Vec<([&'static str; 2], Spec, String)>) -> Vec<(V
 		.join("_")
 	), arg)
 }
-
+*/
 
 static START: Once = ONCE_INIT;
 
@@ -78,7 +80,7 @@ pub fn init() {
 	START.call_once(init_);
 }
 
-fn init_() {
+fn init_() -> Result<(), isize> {
 	let usage = FULL_VERSION.clone() + "
 
 Sample usage:
@@ -197,7 +199,9 @@ Sample usage:
 	}
 
 	if !RUN.dont_need_targets && RUN.target.is_none() {
-		result = Err(arg_plus::Error::Help(1)); /* No targets! Fail and print help. */
+		return Err(1); /* No targets! Fail and print help. */
 	}
 	//ArgPlus.argParse(args, targetParse, usage, |progArgs|
+	
+	Ok(())
 }

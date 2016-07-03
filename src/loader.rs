@@ -4,15 +4,21 @@ use std::fs;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+use ocaml;
 use execute;
 use internal_package;
 use options;
 use path;
-use token::Token;
+use tokenize;
+use token::{
+	Token,
+	CodeSource,
+};
 use value::{
 	self,
 	Value,
 	ExecuteStarter,
+	ExecuteContext,
 	TableValue,
 	TableBlankKind,
 };
@@ -215,9 +221,13 @@ pub fn complete_starter(with_project_location: LoadLocation) -> ExecuteStarter {
         /* TODO convert path to either path or value to load from  */
         /* TODO find some way to make this not assume path loaded from disk */
         let mut path = package_path.clone();
-        for dirname in ["emily", "core", "prototype", &(path_key + ".em")].iter() {
+        
+        for dirname in &["emily", "core", "prototype", &(path_key + ".em")] {
         	path.push(dirname);
     	}
+    	
+    	//path.push(&(path_key + ".em"));
+    	
         let enclosing = load_package_dir(package_starter, LoaderSource::NoSource, path.parent().unwrap());
         load_file(
             box_sub_starter(package_starter, BoxSpec::Populating(BoxTarget::Package, proto)),

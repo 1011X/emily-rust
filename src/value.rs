@@ -1,8 +1,14 @@
 /* Data representation for a runtime value. */
 
+use std::fmt;
 use std::collections::HashMap;
-use std::hash::Hasher;
+use std::hash::{Hash, Hasher};
 use std::borrow::Cow;
+
+use ocaml;
+use token;
+use pretty;
+use options;
 
 pub type TableValue = HashMap<Value, Value>;
 
@@ -38,14 +44,14 @@ pub struct ClosureValue {
 	this: ClosureThis,     /* Tracks the "current" and "this" bindings */
 }
 
-#[derive(Eq)]
-pub enum Value<'a> {
+#[derive(Clone, Eq)]
+pub enum Value {
     /* "Primitive" values */
 	Null,
 	True,
 	Float(f64),
 	String(String),
-	Atom(Cow<'a, str>),
+	Atom(Cow<'static, str>),
 
 	/* Hack types for builtins */ /* FIXME: Can some of these be deprecated? */
 	BuiltinFunction           (Box<Fn(Value) -> Value>), /* function argument = result */
@@ -99,27 +105,15 @@ impl Hash for Value {
 	}
 }
 
-impl Clone for Value {
-	
-}
-
-// Thoughts: implementation should be in Display, and ToString should use THAT to get
-// its value. Right now it's backwards, since it's more convenient because current
-// implementation will have a String object already allocated, so we can just use that.
-impl ToString for Value {
-	fn to_string(&self) -> String {
-		if options::RUN.track_objects {
-			pretty::dump_value_tree_general(pretty::label_wrapper, v)
-		}
-		else {
-			pretty::dump_value_tree_general(pretty::simple_wrapper, v)
-		}
-	}
-}
-
-impl Display for Value {
-	fn fmt(&self, f: &mut Formatter) {
-		f.write_str(&self.to_string());
+impl fmt::Display for Value {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		
+		let wrapper: fn(&str, &Value) -> String = unsafe {
+			if options::RUN.track_objects { pretty::label_wrapper }
+			else { pretty::simple_wrapper }
+		};
+		
+		f.write_str(&pretty::dump_value_tree_general(wrapper, self))
 	}
 }
 
@@ -175,12 +169,13 @@ pub static mut ID_GENERATOR: usize = 0;
 /* "Keywords" */
 
 macro_rules! keywords {
-	($($name:ident, $name_string:ident = $s:expr;)*) => {
-		$(
-			pub static $name_string : &'static str = $s;
-			pub static $name : Value = Value::Atom(Cow::Borrowed($name_string));
-		)*
-	};
+	($($name:ident, $name_str:ident = $s:expr;)*) => {$(
+		pub static $name_str : &'static str = $s;
+		
+		lazy_static! {
+			pub static ref $name : Value = Value::Atom(Cow::Borrowed($name_str));
+		}
+	)*};
 }
 
 keywords! {
@@ -211,9 +206,9 @@ pub fn table_set_option(table: &mut TableValue, key: Value, value: Option<Value>
 
 pub fn table_from(value: Value) -> Result<TableValue, ocaml::Failure> {
 	match value {
-		Value::Table(v) |
-		Value::Object(v) => Ok(v),
+		Value::Table(v)
+		| Value::Object(v) => Ok(v),
 		
-		_ => Err(ocaml::Failure("Internal error-- interpreter accidentally treated a non-object as an object in a place this should have been impossible.".to_string()))
+		_ => Err(ocaml::Failure("Internal error-- interpreter accidentally treated a non-object as an object in a place this should have been impossible.".to_owned()))
 	}
 }

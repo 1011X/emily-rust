@@ -3,6 +3,9 @@
 use std::fmt;
 use std::string::ToString;
 
+use std::borrow::Cow;
+use std::path::PathBuf;
+
 /* Records the original source file of a token */
 #[derive(Clone)]
 pub enum CodeSource {
@@ -27,13 +30,6 @@ impl fmt::Display for CodeSource {
 	}
 }
 
-// Not really needed...
-impl ToString for CodeSource {
-	fn to_string(&self) -> String {
-		format!("{}", self)
-	}
-}
-
 /* Records the original source position of a token */
 #[derive(Clone)]
 pub struct CodePosition {
@@ -46,12 +42,6 @@ pub struct CodePosition {
 impl fmt::Display for CodePosition {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Display {
 		f.write_fmt(format_args!("[{} line {} ch {}]", self.file_name, self.line_number, self.line_offset))
-	}
-}
-
-impl ToString for CodePosition {
-	fn to_string(&self) -> String {
-		format!("{}", self)
 	}
 }
 
@@ -71,13 +61,13 @@ pub enum TokenGroupKind {
 #[derive(Clone)]
 pub enum TokenClosureKind {
 	NonClosure,                             /* Is not a function */
-	ClosureWithBinding (bool, Vec<String>), /* Function with argument-- arg is return?,args */
+	ClosureWithBinding(bool, Vec<String>), /* Function with argument-- arg is return?,args */
 }
 
 /* Representation of a tokenized code blob. */
 /* A CodeSequence is a list of lines. A line is a list of tokens. */
 /* A Token may be a group with its own CodeSequence. */
-pub type CodeSequence = Vec<Vec<Token>>;
+pub type CodeSequence<'a> = Vec<Vec<Token<'a>>>;
 
 #[derive(Clone)]
 pub struct TokenGroup {
@@ -90,12 +80,12 @@ pub struct TokenGroup {
 /* Data content of a token */
 #[derive(Clone)]
 pub enum TokenContents<'a> {
-	Word (Cow<'a, str>),   /* Alphanum */
-	Symbol (Cow<'a, str>), /* Punctuation-- appears pre-macro only. */
-	String (Cow<'a, str>), /* "Quoted" */
-	Atom (Cow<'a, str>),   /* Ideally appears post-macro only */
-	Number (f64),
-	Group (TokenGroup),
+	Word(Cow<'a, str>),   /* Alphanum */
+	Symbol(Cow<'a, str>), /* Punctuation-- appears pre-macro only. */
+	String(Cow<'a, str>), /* "Quoted" */
+	Atom(Cow<'a, str>),   /* Ideally appears post-macro only */
+	Number(f64),
+	Group(TokenGroup),
 }
 
 /* A token. Effectively, an AST node. */

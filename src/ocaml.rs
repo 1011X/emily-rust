@@ -1,11 +1,11 @@
-#![feature(fnbox)]
+use std::boxed::FnBox;
 
 pub struct NotFound;
 pub struct EndOfFile;
 pub struct InvalidArgument(String);
 pub struct Failure(String);
 
-mod arg {
+pub mod arg {
 	pub type Key = String;
 	pub type Doc = String;
 	
@@ -20,7 +20,7 @@ mod arg {
 	}
 }
 
-mod sys {
+pub mod sys {
 	pub struct Break;
 }
 

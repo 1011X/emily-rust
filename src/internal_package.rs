@@ -1,11 +1,23 @@
 use std::sync::{Once, ONCE_INIT};
+use std::borrow::Cow;
 
+use ocaml;
+use execute;
+use value_util;
+use pretty;
+use options;
 use value::{
+    self,
+    ExecuteFrame,
+    RegisterState,
+    TableValue,
     TableBlankKind,
-    Value
+    Value,
 };
-
-use value::TableValue;
+use token::{
+    CodeSource,
+    CodePosition,
+};
 
 pub fn table_pair() -> (TableValue, Value) {
     let table = value_util::table_blank(TableBlankKind::NoSet);
@@ -24,7 +36,7 @@ pub fn fake_register_location(name: &'static str) -> CodePosition {
     CodePosition {
         file_name: CodeSource::Internal(name),
         line_number: 0,
-        line_offset: 0
+        line_offset: 0,
     }
 }
 
@@ -49,10 +61,10 @@ START.call_once(|| {
         set_atom_value(table, n, Value::BuiltinFunction(func));
     
     /* let set_atom_handoff = |table, n, func|
-        set_atom_value(table, n, Value::BuiltinHandoff (func));*/
+        set_atom_value(table, n, Value::BuiltinHandoff(func));*/
     
     let set_atom_binary = |table, n, func|
-        set_atom_value(table, n, value_util::snippet_closure(2, |x| match *x {
+        set_atom_value(table, n, value_util::snippet_closure(2, box |x| match *x {
             [a, b] => func(a, b),
             _ => value_util::impossible_arg("<builtin-pair>")
         }));
@@ -65,6 +77,7 @@ START.call_once(|| {
 
     /* Create a function that consumes an argument, then returns itself. `func` should return void */
     // TODO
+    /*
     fn reusable<F: Fn(Value)>(func: F) -> fn(Value) -> Value {
         fn inner(arg: Value) {
             func(arg);
@@ -72,6 +85,7 @@ START.call_once(|| {
         }
         inner
     }
+    */
 
     set_atom_value(None, "tern", value_util::RAW_TERN);
     set_atom_value(None, "true", Value::True);
@@ -120,8 +134,8 @@ START.call_once(|| {
 
     /* "Submodule" internal.out */
     let out_table = insert_table(None, "out");
-    set_atom_fn(Some(out_table), "print", reusable(|v| print_string(pretty::dump_value_for_user(v))));
-    set_atom_fn(Some(out_table), "flush", reusable(|_| /*// flush_all */ () ));
+    //set_atom_fn(Some(out_table), "print", reusable(|v| print_string(pretty::dump_value_for_user(v))));
+    //set_atom_fn(Some(out_table), "flush", reusable(|_| /*// flush_all */ () ));
 
     /* "Submodule" internal.double */
     let double_table = insert_table(None, "double");
@@ -178,7 +192,7 @@ START.call_once(|| {
 
     /* Note: Does NOT coerce into a type, f is of type f -> value */
     let set_atom_string_op = |table, name, f|
-        set_atom_value(Some(table.unwrap_or(string_table)), name, value_util::snippet_closure(1, |x| match *x {
+        set_atom_value(Some(table.unwrap_or(string_table)), name, value_util::snippet_closure(1, box |x| match *x {
             [Value::String(f1)] => f(f1),
             _ => ocaml::failwith("Can only perform that operation on a string")
         }));
@@ -213,7 +227,7 @@ START.call_once(|| {
         _ => ocaml::failwith("Can only perform that operation on a number")
     }));
 
-    set_atom_value(Some(string_table), "concat", value_util::snippet_closure(2, |x| match *x {
+    set_atom_value(Some(string_table), "concat", value_util::snippet_closure(2, box |x| match *x {
         [Value::String(f1), Value::String(f2)] => Value::String(format!("{}{}", f1, f2)),
         [Value::String(_), _] => ocaml::failwith("Don't know how to combine that with a string"),
         _ => unreachable!()
@@ -227,7 +241,7 @@ START.call_once(|| {
     set_atom_fn(Some(type_table), "isNumber", |v| match v { Value::Float(_) => Value::True, _ => Value::Null});
 
     /* "Submodule" internal.type */
-    
+    /*
     if cfg!(BUILD_INCLUDE_C_FFI) {
         use ffi_support::*;
         let ffi_table = insert_table(None, "ffi");
@@ -265,7 +279,7 @@ START.call_once(|| {
             Value::Table(table)
         });
     }
-
+    */
     /* Done */
 });
 }

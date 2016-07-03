@@ -10,17 +10,20 @@
     Steps 2, 4 and 5 could potentially require code invocation, necessitating the stack.
  */
 
+use ocaml;
+use pretty;
+use token::CodeSequence;
+use value_util::BoxSpec;
 use value::{
+	ClosureValue,
+	ClosureExec,
 	ExecuteFrame,
 	ExecuteStack,
+	ExecuteStarter,
 	RegisterState,
 	TableBlankKind,
 	Value,
 };
-
-use value_util::BoxSpec;
-
-use token::CodeSequence;
 
 /* -- PRACTICAL HELPERS -- */
 
@@ -28,12 +31,12 @@ type AnchoredValue = (Value, CodePosition);
 
 /* These three could technically move into value.rs but BuiltinObject depends on Value */
 pub fn scope_inheriting(kind: TableBlankKind, scope_parent: Value) -> Value {
-    Value::Table (value_util::table_inheriting(kind, scope_parent))
+    Value::Table(value_util::table_inheriting(kind, scope_parent))
 }
 
 pub fn object_literal_scope(obj: BoxSpec, scope_parent: Value) -> Value {
     /* Should this be Value::Object or Value::Table, and *why*? */
-    Value::Table (value_util::box_blank(obj, scope_parent))
+    Value::Table(value_util::box_blank(obj, scope_parent))
 }
 
 /* Given a parent scope and a token creates an appropriate inner group scope */
@@ -46,9 +49,9 @@ pub fn group_scope(context: ExecuteContext, token_kind: TokenGroupKind, scope: V
             initializer_value.unwrap_or(scope)
         ),
         
-        TokenGroupKind::Box (kind) => object_literal_scope(
-            value_util::PopulatingObject (initializer_value.unwrap_or(
-            	value_util::object_blank(Some (context.object_proto))
+        TokenGroupKind::Box(kind) => object_literal_scope(
+            value_util::PopulatingObject(initializer_value.unwrap_or(
+            	value_util::object_blank(Some(context.object_proto))
             )),
             scope
         ),
@@ -61,13 +64,13 @@ pub fn group_scope(context: ExecuteContext, token_kind: TokenGroupKind, scope: V
 pub fn new_state_for(register: RegisterState, av: AnchoredValue) -> RegisterState {
 	match (register, av) {
     	/* Either throw out a stale LineStart / PairValue and simply take the new value, */
-		(RegisterState::LineStart (_, rat), (v, at)) |
-		(RegisterState::PairValue (_, _, rat, _), (v, at)) =>
+		(RegisterState::LineStart(_, rat), (v, at)) |
+		(RegisterState::PairValue(_, _, rat, _), (v, at)) =>
 			RegisterState::FirstValue (v, rat, at),
 		
 		/* Or combine with an existing value to make a pair. */
-		(RegisterState::FirstValue (v, rat, _), (v2, at)) =>
-			RegisterState::PairValue (v, v2, rat, at)
+		(RegisterState::FirstValue(v, rat, _), (v2, at)) =>
+			RegisterState::PairValue(v, v2, rat, at)
 	}
 }
 
@@ -132,7 +135,7 @@ apply: (A pair of values has been identified; evaluate their application.)
 /* execute_step is the "start of the loop"-- the entry point we return to after each action.
    it currently just unpacks the stack, cleans it up, and passes components on to process. */
 pub fn execute_step(context: ExecuteContext, stack: ExecuteStack) -> Value {
-    match &*stack {
+    match *stack {
         /* Unusual edge case: Asked to execute an empty file -- just return */
         [] => Value::Null,
 
@@ -140,7 +143,7 @@ pub fn execute_step(context: ExecuteContext, stack: ExecuteStack) -> Value {
            implying unnecessary space on the stack, then rewrite the stack to avoid them. */
 
         /* Case #1: Remove blank lines so they don't mess up other TCO checks later */
-        [more_frames.., ExecuteFrame {register, scope, ref code, ..}]
+        [ref more_frames.., ExecuteFrame {register, scope, ref code, ..}]
         if code.len() >= 2 && code[1].is_empty() => execute_step(context, {
         	let mut v = more_frames.to_vec();
         	v.push(ExecuteFrame {
@@ -157,8 +160,8 @@ pub fn execute_step(context: ExecuteContext, stack: ExecuteStack) -> Value {
 
         /* Case #2: A normal group descent, but into an unnecessary pair of parenthesis.
            IOW, the next-to-top frame does no work; its code only ever contained a group token. */
-        [more_frames.., ExecuteFrame {
-        	register: RegisterState::LineStart (..),
+        [ref more_frames.., ExecuteFrame {
+        	register: RegisterState::LineStart(..),
         	ref code, ..
         }, frame]
         if code.len() == 1 && code[0].is_empty() => execute_step(context, {
@@ -169,8 +172,8 @@ pub fn execute_step(context: ExecuteContext, stack: ExecuteStack) -> Value {
 
         /* Case #3: Canonical tail call: A function application, at the end of a group.
            We can thus excise the frame that's just waiting for the application to return. */
-        [more_frames.., ExecuteFrame {
-        	register: RegisterState::PairValue (..),
+        [ref more_frames.., ExecuteFrame {
+        	register: RegisterState::PairValue(..),
         	ref code, ..
         }, frame]
         if code.len() == 1 && code[0].is_empty() => execute_step(context, {
@@ -180,22 +183,22 @@ pub fn execute_step(context: ExecuteContext, stack: ExecuteStack) -> Value {
         }),
 
         /* Case #4: Applying a continuation: We can ditch all other context. */
-        [more_frames.., frame @ ExecuteFrame {
-	    	register: RegisterState::FirstValue (Value::Continuation (continue_stack, at), _, _),
+        [ref more_frames.., frame @ ExecuteFrame {
+	    	register: RegisterState::FirstValue(Value::Continuation (continue_stack, at), _, _),
 	        ref code, ..
 		}]
 		/* "Match a nonempty two-dimensional list" */
 		if !code.is_empty() && !code[0].is_empty() => execute_step(context, {
         	let mut v = continue_stack.clone();
         	v.push(ExecuteFrame {
-        		register: RegisterState::LineStart (Value::Null, at.clone()),
+        		register: RegisterState::LineStart(Value::Null, at.clone()),
         		..frame
         	});
         	v
         }),
 
         /* Break stack frames into first and rest */
-        [more_frames.., frame] =>
+        [ref more_frames.., frame] =>
             execute_step_with_frames(context, stack, frame, more_frames.to_vec()),
     }
 }
@@ -234,8 +237,8 @@ pub fn execute_step_with_frames(context: ExecuteContext, stack: ExecuteStack, fr
             apply(context, stack, a, a, (b, bat)),
 
         /* Either no values or just one values, so let's look at the tokens */
-        RegisterState::FirstValue (..) |
-        RegisterState::LineStart (..) =>
+        RegisterState::FirstValue(..)
+        | RegisterState::LineStart(..) =>
             evaluate_token(context, stack, frame, more_frames),
             /* Pop current frame from the stack, integrate the result into the last frame and recurse (TODO) */
     }
@@ -243,12 +246,12 @@ pub fn execute_step_with_frames(context: ExecuteContext, stack: ExecuteStack, fr
 
 pub fn evaluate_token(context: ExecuteContext, stack: ExecuteStack, frame: ExecuteFrame, more_frames: Vec<ExecuteFrame>) -> Value {
     /* Look at code sequence in frame */
-    match &*frame.code {
+    match *frame.code {
         /* It's empty. We have reached the end of the group. */
         [] => {
         	let avalue = match frame.register { /* Unpack Value 1 from register */
-                RegisterState::LineStart (v, rat) |
-                RegisterState::FirstValue (v, rat, _) => (v, rat),
+                RegisterState::LineStart(v, rat)
+                | RegisterState::FirstValue(v, rat, _) => (v, rat),
                 _ => unreachable!(), /* If PairValue, should have branched off above */
             };
             /* "Return from frame" and recurse */
@@ -256,20 +259,20 @@ pub fn evaluate_token(context: ExecuteContext, stack: ExecuteStack, frame: Execu
         }
 
         /* Break lines in current frame's codeSequence into last and rest */
-        [more_lines.., line] =>
+        [ref more_lines.., line] =>
             evaluate_token_from_lines(context, stack, frame, more_frames, line, more_lines),
     }
 }
 
 pub fn evaluate_token_from_lines(context: ExecuteContext, stack: ExecuteStack, frame: ExecuteFrame, more_frames: Vec<ExecuteFrame>, line: Vec<Token>, more_lines: Vec<Vec<Token>>) -> Value {
     /* Look at line in code sequence. */
-    match &*line {
+    match *line {
         /* It's empty. We have reached the end of the line. */
         [] => {
             /* Convert Value 1 to a LineStart value to persist to next line */
             let new_state = match frame.register {
-                RegisterState::LineStart (v, rat) |
-                RegisterState::FirstValue (v, rat, _) =>
+                RegisterState::LineStart (v, rat)
+                | RegisterState::FirstValue (v, rat, _) =>
                 	RegisterState::LineStart (v, rat),
                 _ => unreachable!(), /* Again: if PairValue, should have branched off above */
 			};
@@ -286,7 +289,7 @@ pub fn evaluate_token_from_lines(context: ExecuteContext, stack: ExecuteStack, f
 		}
 		
         /* Break tokens in current line into first and rest */
-        [more_tokens.., token] =>
+        [ref more_tokens.., token] =>
             evaluate_token_from_tokens(context, stack, frame, more_frames, line, more_lines, token, more_tokens)
     }
 }
@@ -299,12 +302,12 @@ pub fn return_to(context: ExecuteContext, stack_top: ExecuteStack, av: AnchoredV
     }
 
     /* Unpack the new stack. */
-    match &*stack_top {
+    match *stack_top {
         /* It's empty. We're returning from the final frame and can just exit. */
         [] => av.0,
 
         /* Pull one frame off the stack so we can replace the register var and re-add it. */
-        [past_return_frames.., ExecuteFrame {register: parent_register, code: parent_code, scope: parent_scope}] => {
+        [ref past_return_frames.., ExecuteFrame {register: parent_register, code: parent_code, scope: parent_scope}] => {
             execute_step(context, {
             	let mut v = past_return_frames.to_vec();
             	v.push(ExecuteFrame {
@@ -364,22 +367,22 @@ pub fn evaluate_token_from_tokens(context: ExecuteContext, stack: ExecuteStack, 
     match token.contents {
         /* Straightforward values that can be evaluated in place: */
         /* A bare word should be looked up from the scope. */
-        Token::Word (s) => apply(context, stack_with_register(frame.register), frame.scope, frame.scope, (Value::Atom (s), token.at)),
+        Token::Word(s) => apply(context, stack_with_register(frame.register), frame.scope, frame.scope, (Value::Atom(s), token.at)),
         /* A literal value should be simply converted from Token to Value. */
-        Token::String (s) => simple_value(Value::String (s)),
-        Token::Atom (s) => simple_value(Value::Atom (s)),
-        Token::Number (f) => simple_value(Value::Float (f)),
+        Token::String(s) => simple_value(Value::String(s)),
+        Token::Atom(s) => simple_value(Value::Atom(s)),
+        Token::Number(f) => simple_value(Value::Float(f)),
         /* Symbols are not allowed at this point, they can only survive if a macro inserted one. */
-        Token::Symbol (s) => token::fail_token(token, format!("Faulty macro: Symbol {} left unprocessed", s)),
+        Token::Symbol(s) => token::fail_token(token, format!("Faulty macro: Symbol {} left unprocessed", s)),
         /* Not straightforward: This token is a parenthetical. */
-        Token::Group (group) => match group.closure {
+        Token::Group(group) => match group.closure {
             /* Nonclosure groups are nontrivial to evaluate, and will require a new stack frame. */
             TokenClosureKind::NonClosure => {
                 /* This creates the new frame with an enclosing scope designated. */
                 let push_frame = |with_initializer_value| {
                     let new_scope = group_scope(context, group.kind, frame.scope, with_initializer_value);
                     let items = match group.kind {
-                        TokenGroupKind::Box (_) => {
+                        TokenGroupKind::Box(_) => {
                             let wrapper_group = token::clone(token, &TokenContents::Group(TokenGroup {
                             	kind: TokenGroupKind::Plain,
                             	closure: TokenGroupKind::NonClosure,
@@ -407,15 +410,15 @@ pub fn evaluate_token_from_tokens(context: ExecuteContext, stack: ExecuteStack, 
                 };
 
                 /* Now we need to pick that enclosing scope. */
-                match &*group.group_initializer {
+                match *group.group_initializer {
                     /* For ordinary groups, it is known: */
                     [] => push_frame(None),
                     /* But groups with an initializer, we must evaluate code to get the scope: */
-                    group_initializer => {
-                        let handoff = |f, _| push_frame(Some (f));
+                    [ref group_initializer..] => {
+                        let handoff = |f, _| push_frame(Some(f));
                         
                         execute_step(context, {
-                        	let mut v = stack_with_register(RegisterState::FirstValue(Value::BuiltinHandoff (handoff), token.at, token.at));
+                        	let mut v = stack_with_register(RegisterState::FirstValue(Value::BuiltinHandoff(handoff), token.at, token.at));
                         	v.push(ExecuteFrame {
                             	register: start_register(token.at),
                                 code: vec![group_initializer],
@@ -433,27 +436,27 @@ pub fn evaluate_token_from_tokens(context: ExecuteContext, stack: ExecuteStack, 
 }
 
 /* apply item a to item b and return it to the current frame */
-pub fn apply(context: ExecuteContext, stack: ExecuteStack, this: Value, a: Value, b: AnchoredValue) -> Result<> {
+pub fn apply(context: ExecuteContext, stack: ExecuteStack, this: Value, a: Value, b: AnchoredValue) -> Result<(), ()> {
     /* FIXME: Document what *exactly* is the definition of b/bat? */
     let (bv, bat) = b;
     let r = |v| return_to(context, stack, (v, bat));
     /* Pull something out of a table, possibly recursing */
     let read_table = |t| match (a, t.get(bv)) {
-        (_, Some (&Value::UserMethod (f))) =>
+        (_, Some(&Value::UserMethod(f))) =>
         	apply(context, stack, f, f, (this, bat)), /* FIXME: Comment this */
     	
         (_, Some (&Value::BuiltinMethod (f))) =>
-        	r(Value::BuiltinFunction (f(this))),
+        	r(Value::BuiltinFunction(f(this))),
     	
-        (_, Some (&Value::BuiltinUnaryMethod (f))) => r(match f(this) {
-        	Ok (v) => v,
-            Err (e) => fail_with_stack(stack, format!("Runtime error, applying {} to {}: {}", a, bv, e)),
+        (_, Some (&Value::BuiltinUnaryMethod(f))) => r(match f(this) {
+        	Ok(v) => v,
+            Err(e) => fail_with_stack(stack, format!("Runtime error, applying {} to {}: {}", a, bv, e)),
         }),
         
-        (Value::Object (_), Some (&c @ Value::Closure (_))) => r(value_util::raw_rethis_super_from(this, c)),
-        (_, Some (&v)) => r(v),
+        (Value::Object(_), Some (&c @ Value::Closure(_))) => r(value_util::raw_rethis_super_from(this, c)),
+        (_, Some(&v)) => r(v),
         (_, None) => match (a, t.get(*value::PARENT_KEY)) {
-            (Value::Object (_), Some (&parent @ Value::Closure (_))) =>
+            (Value::Object(_), Some(&parent @ Value::Closure(_))) =>
                 apply(context, stack, this, value_util::raw_rethis_super_from(this, parent), b),
             (_, Some (&parent)) => apply(context, stack, this, parent, b),
             (_, None) => value_util::raw_misapply_stack(stack, this, bv),
@@ -473,12 +476,13 @@ pub fn apply(context: ExecuteContext, stack: ExecuteStack, this: Value, a: Value
     /* Perform the application */
     match a {
         /* If applying a closure. */
-        Value::Closure (c) => {
+        Value::Closure(c) => {
             let descend = |c| {
                 let b: Vec<_> = c.bound.iter().cloned().rev().collect();
+                let bound = c.bound;
                 
                 match c.exec {
-                    ClosureExec::User (exec) => {
+                    ClosureExec::User(exec) => {
                         /* FIXME: should be a noscope operation for bound=[], this=None */
                         let scope_kind = if exec.scoped {
                         	TableBlankKind::WithLet
@@ -527,9 +531,9 @@ pub fn apply(context: ExecuteContext, stack: ExecuteStack, this: Value, a: Value
                         execute_step(context, stack.iter().cloned().chained(vec![stack_frame(scope, exec.body, bat)]).collect())
                     }
                     
-		            ClosureExec::Builtin (f) => r(match f(bound) {
-		            	Ok (v) => v,
-	                    Err (e) => fail_with_stack(stack, format!("Runtime error, applying builtin closure to arguments [{}]: {}",
+		            ClosureExec::Builtin(f) => r(match f(bound) {
+		            	Ok(v) => v,
+	                    Err(e) => fail_with_stack(stack, format!("Runtime error, applying builtin closure to arguments [{}]: {}",
 					        bound.map(pretty::dump_value).join(", "),
 					        e
 					    )),

@@ -4,8 +4,6 @@
 use std::io;
 use std::fs::File; 
 
-use ctrlc::CtrlC;
-
 use ocaml;
 use pretty;
 use execute;
@@ -147,7 +145,8 @@ pub fn repl(target: &'static Option<ExecutionTarget>) {
     run_user_files();
 
     /* Intercept Control-C so it doesn't kill the REPL. */
-    CtrlC::set_handler(|| println!("")); /* Control-C should clear the line, draw a new prompt */
+    // TODO
+    //CtrlC::set_handler(|| println!("")); /* Control-C should clear the line, draw a new prompt */
 
     /* As long as the user hasn't sent EOF (Control-D), read input */
     loop {

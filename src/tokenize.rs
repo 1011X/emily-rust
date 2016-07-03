@@ -6,6 +6,7 @@
    currently unimplemented, macro-processing step. */
 
 use std::io;
+use std::result;
 
 use regex_syntax::{
 	Expr,
@@ -15,18 +16,23 @@ use regex_syntax::{
 };
 
 use token::{
+	self,
+	CodeSource,
 	CodePosition,
 	CodeSequence,
 	Token,
 	TokenGroupKind,
+	TokenContents,
+	TokenClosureKind,
+	BoxKind,
 	
 	CompilationError,
 };
 
 pub enum Error {
-	Compilation (token::CompilationError),
-	Failure (String),
-	Io (io::Error),
+	Compilation(token::CompilationError),
+	Failure(String),
+	Io(io::Error),
 }
 
 type Result<T> = std::result::Result<T, Error>;
@@ -40,20 +46,20 @@ pub struct TokenizeState {
 }
 
 #[derive(Clone, Copy)]
-pub enum GroupCloseToken { Eof, Char (char) }
+pub enum GroupCloseToken { Eof, Char(char) }
 
 pub type GroupCloseRecord = (GroupCloseToken, CodePosition);
 
 pub fn group_close_human_readable(kind: &GroupCloseToken) -> String {
 	match *kind {
-		GroupCloseToken::Eof => "end of file".to_string(),
-		GroupCloseToken::Char (c) => format!("\"{}\"", c),
+		GroupCloseToken::Eof => "end of file".to_owned(),
+		GroupCloseToken::Char(c) => format!("\"{}\"", c),
 	}
 }
 
 /* Entry point to tokenize, takes a filename and a lexbuf */
 /* TODO: Somehow strip blank lines? */
-pub fn tokenize(enclosingKind: TokenGroupKind, name: CodeSource, mut buf: String) -> Result<Token> {
+pub fn tokenize(enclosing_kind: TokenGroupKind, name: CodeSource, mut buf: String) -> Result<Token> {
 	use regex_syntax::Expr::*;
     /* -- Helper regexps -- */
     //let digit = parse("[0-9]").unwrap();
@@ -138,7 +144,10 @@ pub fn tokenize(enclosingKind: TokenGroupKind, name: CodeSource, mut buf: String
         line_offset: Sedlexing.lexeme_end(buf) - state.line_start
     };
     /* Parse failure. Include current position string. */
-    let parse_fail = |mesg| token::fail_at(current_position(), mesg);
+    fn parse_fail(mesg: &str) -> Result<(), CompilationError> {
+    	token::fail_at(current_position(), mesg);
+	}
+	
     let incomplete_fail = |mesg| token::incomplete_at(current_position(), mesg);
 
     /* -- Parsers -- */
@@ -156,10 +165,10 @@ pub fn tokenize(enclosingKind: TokenGroupKind, name: CodeSource, mut buf: String
         let proceed = || {
             /* Call after seeing a backslash. Matches one character, returns string escape corresponds to. */
             let escaped_char = |c| match c {
-                '\\' => Ok ("\\"),
-                '"'  => Ok ("\""),
-                'n'  => Ok ("\n"),
-                _    => Err (parse_fail("Unrecognized escape sequence").unwrap_err()), /* TODO: devour newlines */
+                '\\' => Ok("\\"),
+                '"'  => Ok("\""),
+                'n'  => Ok("\n"),
+                _    => Err(parse_fail("Unrecognized escape sequence").unwrap_err()), /* TODO: devour newlines */
             };
             
             /* Chew through until quoted string ends */
@@ -281,7 +290,7 @@ pub fn tokenize(enclosingKind: TokenGroupKind, name: CodeSource, mut buf: String
 
         let group_close_under_token = || match matched_lexemes() {
         	"" => GroupCloseToken::Eof,
-        	s => GroupCloseToken::Char (s),
+        	s => GroupCloseToken::Char(s),
         };
 
         /* Recurse with blank code, and a new group_seed described by the arguments */
@@ -340,16 +349,16 @@ pub fn tokenize(enclosingKind: TokenGroupKind, name: CodeSource, mut buf: String
                 let (group_close, group_close_at) = group_close;
                 /* This is a matching close */
                 if candidate_close == group_close {
-                	Ok (close_group())
+                	Ok(close_group())
             	}
                 /* This is not a matching close */
                 else {
                 	match candidate_close {
 		                /* No close before EOF: Failure is positioned at the opening symbol */
-		                GroupCloseToken::Eof => Err (token::incomplete_at(group_close_at,
+		                GroupCloseToken::Eof => Err(token::incomplete_at(group_close_at,
 		                    &format!("Did not find matching {} anywhere before end of file. Opening symbol:", group_close_human_readable(group_close))).unwrap_err()),
 		                /* Close present, but wrong: Failure is positioned at closing symbol */
-		                GroupCloseToken::Char (_) => Err (parse_fail(
+		                GroupCloseToken::Char(_) => Err(parse_fail(
                         	format!("Expected closing {} but instead found {}", group_close_human_readable(group_close), group_close_human_readable(candidate_close))).unwrap_err()
                     	)
                     }
@@ -386,19 +395,19 @@ pub fn tokenize(enclosingKind: TokenGroupKind, name: CodeSource, mut buf: String
 
             /* On groups or closures, open a new parser (NO TCO AT THIS TIME) and add its result token to the current line */
             '(' => add_to_line_proceed(open_ordinary_group(TokenGroupKind::Plain)),
-            '{' => add_to_line_proceed(open_ordinary_group(TokenGroupKind::Scoped)),
-            '[' => add_to_line_proceed(open_ordinary_group(TokenGroupKind::Box (BoxKind::NewObject))),
-            a if a == case => add_single(|x| TokenContents::Symbol(x)),
+            '{' => add_to_line_proceed(open_ordinary_groug(TokenGroupKind::Scoped)),
+            '[' => add_to_line_proceed(open_ordinary_group(TokenGroupKind::Box(BoxKind::NewObject))),
+            a if a == case => add_single(TokenContents::Symbol),
             _ => Err(parse_fail("Unexpected character").unwrap_err()) /* Probably not possible? */
         }
     }
 
     /* When first entering the parser, treat the entire program as implicitly being surrounded by parenthesis */
-    proceed((GroupCloseToken::Eof, current_position()), token::make_group(current_position()), TokenClosureKind::NonClosure (enclosing_kind), vec![], vec![])
+    proceed((GroupCloseToken::Eof, current_position()), token::make_group(current_position()), TokenClosureKind::NonClosure(enclosing_kind), vec![], vec![])
 }
 
 /* Tokenize entry point typed to channel */
-pub fn tokenize_channel<C: Read>(source: CodeSource, channel: C) -> Result<Token> {
+pub fn tokenize_channel<C: io::Read>(source: CodeSource, channel: C) -> Result<Token> {
     let lexbuf = Sedlexing.Utf8.from_channel(channel);
     
     tokenize(TokenGroupKind::Plain, source, lexbuf)
@@ -411,7 +420,7 @@ pub fn tokenize_string(source: CodeSource, string: String) -> Result<Token> {
     tokenize(TokenGroupKind::Plain, source, lexbuf)
 }
 
-pub fn unwrap(token: Token) -> std::result::Result<CodeSequence, String> {
+pub fn unwrap(token: Token) -> result::Result<CodeSequence, String> {
 	match token.contents {
 		TokenContents::Group(g) => Ok(g.items),
 		_ => Err(format!("Internal error: Object in wrong place {}", token.at))

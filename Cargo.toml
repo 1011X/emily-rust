@@ -8,8 +8,4 @@ authors = [
 [dependencies]
 regex = "0.1.41"
 lazy_static = "0.1.15"
-ctrlc = "1.0.1"
 regex-syntax = "0.2.2"
-
-[dependencies.bindgen]
-git = "https://github.com/crabtw/rust-bindgen.git"

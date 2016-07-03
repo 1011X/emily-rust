@@ -10,8 +10,7 @@ Not all features of Arg are implemented, notably most spec types are not support
 use std::env;
 use std::collections::HashMap;
 
-use ocaml::arg;
-use ocaml::arg::Spec;
+use ocaml::*;
 
 /* Rule methods can raise Arg.Bad, Arg.Help, ArgPlus.Help or ArgPlus.Complete */
 pub enum Error {

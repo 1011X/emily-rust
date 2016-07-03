@@ -1,19 +1,15 @@
 /* Loads a program and runs it, based on contents of Options. */
 
-/*
 #![feature(box_syntax)]
 #![feature(slice_patterns)]
 #![feature(advanced_slice_patterns)]
 #![feature(box_patterns)]
-#![feature(phase)]
+#![feature(fn_box)]
 
 #[macro_use]
 extern crate lazy_static;
 extern crate regex_syntax;
 extern crate getopts;
-extern crate ctrlc;
-#[phase(plugin)]
-extern crate bindgen;
 
 mod ocaml;
 
@@ -25,14 +21,13 @@ mod path;
 mod value;
 mod value_util;
 
-mod ffi_support;
+//mod ffi_support;
 mod options;
 mod tokenize;
 mod token;
 mod loader;
 mod pretty;
 mod repl;
-*/
 
 use options::ExecutionTarget;
 use token::CodeSource;
