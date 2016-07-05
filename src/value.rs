@@ -62,7 +62,6 @@ pub enum Value {
     /* Complex user-created values */
     
 	/* Is this getting kind of complicated? Should curry be wrapped closures? Should callcc be separate? */
-	
 	Closure(ClosureValue),
 	UserMethod(Box<Value>),
 	Table(TableValue),
@@ -71,7 +70,7 @@ pub enum Value {
 }
 
 // Used for implementing OCaml's equality rules
-// Note: PartialEq should not be implemented like this. This is just temporary. Maybe.
+// Note: PartialEq probably shouldn't be implemented like this. This is just temporary. Maybe.
 impl PartialEq for Value {
 	fn eq(&self, other: &Value) -> bool {
 		match (self, other) {
