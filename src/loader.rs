@@ -83,7 +83,7 @@ impl LoaderSource {
     /* Given a pre-`self_filter`ed LoaderSource, convert to an Option. */
     /* FIXME: Should the error state (SelfSource) instead be an allowed case? */
     fn known_filter(self) -> Option<Value> {
-        match source {
+        match self {
             LoaderSource::NoSource => None,
             LoaderSource::Source(x) => Some(x),
             _ => panic!("Internal error: Package loader attempted to load a file as if it were a directory")

@@ -10,13 +10,34 @@
     Steps 2, 4 and 5 could potentially require code invocation, necessitating the stack.
  */
 
+use std::borrow::Cow;
+
 use ocaml;
+use options;
 use pretty;
-use token::CodeSequence;
-use value_util::BoxSpec;
+use token::{
+	self,
+	CodePosition,
+	CodeSequence,
+	CodeSource,
+	Token,
+	TokenClosureKind,
+	TokenContents,
+	TokenGroup,
+	TokenGroupKind,
+};
+use value_util::{
+	self,
+	BoxSpec,
+	BoxTarget,
+};
 use value::{
+    self,
     ClosureValue,
     ClosureExec,
+    ClosureExecUser,
+    ClosureThis,
+    ExecuteContext,
     ExecuteFrame,
     ExecuteStack,
     ExecuteStarter,
@@ -50,9 +71,10 @@ pub fn group_scope(context: ExecuteContext, token_kind: TokenGroupKind, scope: V
         ),
         
         TokenGroupKind::Box(kind) => object_literal_scope(
-            value_util::PopulatingObject(initializer_value.unwrap_or(
-                value_util::object_blank(Some(context.object_proto))
-            )),
+            BoxSpec::Populating(
+            	BoxTarget::Object,
+            	initializer_value.unwrap_or(value_util::object_blank(context))
+            ),
             scope
         ),
     }
@@ -328,7 +350,7 @@ pub fn evaluate_token_from_tokens(context: ExecuteContext, stack: ExecuteStack, 
         let mut v = more_frames.clone();
         v.push(ExecuteFrame {
             register: register,
-            code: more_line.iter().cloned().chained(vec![more_tokens]).collect(),
+            code: more_lines.iter().cloned().chained(vec![more_tokens]).collect(),
             scope: frame.scope,
         });
         v
@@ -387,7 +409,7 @@ pub fn evaluate_token_from_tokens(context: ExecuteContext, stack: ExecuteStack, 
                                 group_initializer: vec![],
                                 items: group.items,
                             }));
-                            let word = clone(token, TokenContents::Word(Cow::Borrowed(value::CURRENT_KEY_STRING)));
+                            let word = token::clone(token, TokenContents::Word(Cow::Borrowed(value::CURRENT_KEY_STRING)));
                             vec![vec![wrapper_group], vec![word]]
                         }
                         _ => group.items,
@@ -444,8 +466,7 @@ pub fn apply(context: ExecuteContext, stack: ExecuteStack, this: Value, a: Value
         (_, Some(&Value::UserMethod(f))) =>
             apply(context, stack, f, f, (this, bat)), /* FIXME: Comment this */
         
-        (_, Some(&Value::BuiltinMethod(f))) =>
-            r(Value::BuiltinFunction(f(this))),
+        (_, Some(&Value::BuiltinMethod(f))) => r(Value::BuiltinFunction(f(this))),
         
         (_, Some(&Value::BuiltinUnaryMethod(f))) => r(match f(this) {
             Ok(v) => v,
@@ -533,7 +554,7 @@ pub fn apply(context: ExecuteContext, stack: ExecuteStack, this: Value, a: Value
                     ClosureExec::Builtin(f) => r(match f(bound) {
                         Ok(v) => v,
                         Err(e) => fail_with_stack(stack, format!("Runtime error, applying builtin closure to arguments [{}]: {}",
-                            bound.map(pretty::dump_value).join(", "),
+                            bound.map(|v| v.to_string()).join(", "),
                             e
                         )),
                     }),
@@ -560,27 +581,26 @@ pub fn apply(context: ExecuteContext, stack: ExecuteStack, this: Value, a: Value
             return_to(context, stack, b),
 
         /* If applying a table or table op. */
-        Value::Object(t) | Value::Table(t) => read_table(t),
+        Value::Object(ref t) | Value::Table(ref t) => read_table(t),
         
         /* If applying a primitive value. */
-        Value::Null =>       apply(context, stack, a, null_proto, b),
-        Value::True =>       apply(context, stack, a, true_proto, b),
-        Value::Float(v) =>   apply(context, stack, a, float_proto, b),
-        Value::String(v) =>  apply(context, stack, a, string_proto, b),
-        Value::Atom(v) =>    apply(context, stack, a, atom_proto, b),
+        Value::Null =>      apply(context, stack, a, null_proto, b),
+        Value::True =>      apply(context, stack, a, true_proto, b),
+        Value::Float(_) =>  apply(context, stack, a, float_proto, b),
+        Value::String(_) => apply(context, stack, a, string_proto, b),
+        Value::Atom(_) =>   apply(context, stack, a, atom_proto, b),
         
         /* If applying a builtin special. */
         Value::BuiltinFunction(f) => r(match f(bv) {
+            Ok(v) => v,
             Err(ocaml::Failure(e)) =>
                 fail_with_stack(stack, format!("Runtime error, applying builtin function to {}: {}", bv, e)),
-            Err(e) => return Err(e),
-            Ok(v) => v,
         }),
         
-        Value::BuiltinHandoff(f) => /* Note: No this included, so not for methods */
-            f(context, stack, b),
+        /* Note: No this included, so not for methods */
+        Value::BuiltinHandoff(f) => f(context, stack, b),
         
-        /* Unworkable -- all builtin method values should be erased by readTable */
+        /* Unworkable -- all builtin method values should be erased by read_table */
         Value::BuiltinMethod(_) | Value::BuiltinUnaryMethod(_) | Value::UserMethod(_) =>
             unreachable!(),
     }

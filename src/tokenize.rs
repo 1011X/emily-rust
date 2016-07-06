@@ -5,16 +5,21 @@
    The parts we'd think of a "parser" as usually doing will be handled in a second,
    currently unimplemented, macro-processing step. */
 
+extern crate regex_syntax;
+
 use std::io;
 use std::result;
+use std::borrow::Cow;
 
-use regex_syntax::{
+use self::regex_syntax::{
 	Expr,
 	Repeater,
 	CharClass,
 	ClassRange,
 };
 
+use macros;
+use options;
 use token::{
 	self,
 	CodeSource,
@@ -35,7 +40,7 @@ pub enum Error {
 	Io(io::Error),
 }
 
-type Result<T> = std::result::Result<T, Error>;
+type Result<T> = result::Result<T, Error>;
 
 /* Tokenize uses sedlex which is inherently stateful, so tokenize for a single source string is stateful.
    This is the basic state for a file parse-- it basically just records the position of the last seen newline. */
@@ -60,40 +65,39 @@ pub fn group_close_human_readable(kind: &GroupCloseToken) -> String {
 /* Entry point to tokenize, takes a filename and a lexbuf */
 /* TODO: Somehow strip blank lines? */
 pub fn tokenize(enclosing_kind: TokenGroupKind, name: CodeSource, mut buf: String) -> Result<Token> {
-	use regex_syntax::Expr::*;
     /* -- Helper regexps -- */
     //let digit = parse("[0-9]").unwrap();
-    let number = parse("[:digit:]+").unwrap();
-    let octal_digit = parse("[0-7]").unwrap();
-    let octal_number = parse("0o[0-7]+").unwrap();
-    let hex_digit = parse("[0-9a-fA-F]").unwrap();
-    let hex_number = parse("0x[:xdigit:]+").unwrap();
-    let binary_number = parse("0b[01]+").unwrap();
-    let letter_pattern = parse("[:alpha:]").unwrap();
-    let word_pattern = parse("[:alpha:][:alnum:]*").unwrap();
-    let sci_notation = parse("[eE][-+]?[:digit:]").unwrap();
-    let float_pattern = Alternate (vec![
-    	Concat (vec![
-    		Literal {
+    let number = regex_syntax::parse("[:digit:]+").unwrap();
+    let octal_digit = regex_syntax::parse("[0-7]").unwrap();
+    let octal_number = regex_syntax::parse("0o[0-7]+").unwrap();
+    let hex_digit = regex_syntax::parse("[0-9a-fA-F]").unwrap();
+    let hex_number = regex_syntax::parse("0x[:xdigit:]+").unwrap();
+    let binary_number = regex_syntax::parse("0b[01]+").unwrap();
+    let letter_pattern = regex_syntax::parse("[:alpha:]").unwrap();
+    let word_pattern = regex_syntax::parse("[:alpha:][:alnum:]*").unwrap();
+    let sci_notation = regex_syntax::parse("[eE][-+]?[:digit:]").unwrap();
+    let float_pattern = Expr::Alternate(vec![
+    	Expr::Concat(vec![
+    		Expr::Literal {
     			chars: vec!['.'],
     			casei: true
 			},
 			number.clone(),
 		]),
-		Concat (vec![
+		Expr::Concat(vec![
 			number.clone(),
-			Repeat {
-				e: Box::new(Concat (vec![
+			Expr::Repeat {
+				e: box Expr::Concat(vec![
 					Literal {
 						chars: vec!['.'],
 						casei: true
 					},
 					number.clone(),
-				])),
+				]),
 				r: Repeater::ZeroOrOne,
 				greedy: true,
 			},
-			Repeat {
+			Expr::Repeat {
 				e: Box::new(sci_notation.clone()),
 				r: Repeater::ZeroOrOne,
 				greedy: true,
@@ -101,7 +105,7 @@ pub fn tokenize(enclosing_kind: TokenGroupKind, name: CodeSource, mut buf: Strin
 		]),
 	]);
 	
-	let number_pattern = Alternate (vec![
+	let number_pattern = Expr::Alternate(vec![
 		hex_number.clone(),
 		octal_number.clone(),
 		float_pattern.clone(),
@@ -119,7 +123,7 @@ pub fn tokenize(enclosing_kind: TokenGroupKind, name: CodeSource, mut buf: Strin
 
     /* Individual lines get a more special cleanup so macro processing can occur */
     let complete_line = |l| {
-        if options::RUN.step_macro { 
+        if unsafe { options::RUN.step_macro } { 
             println!("-- Macro processing for {}", name);
         }
         
@@ -130,7 +134,7 @@ pub fn tokenize(enclosing_kind: TokenGroupKind, name: CodeSource, mut buf: Strin
     /* Current tokenizer state */
     let mut state = TokenizeState {
     	line_start: 0,
-    	line: 1
+    	line: 1,
 	};
     /* Call when the current selected sedlex match is a newline. Mutates tokenizer state. */
     let state_newline = || {
@@ -141,10 +145,10 @@ pub fn tokenize(enclosing_kind: TokenGroupKind, name: CodeSource, mut buf: Strin
     let current_position = || CodePosition {
         file_name:   name,
         line_number: state.line,
-        line_offset: Sedlexing.lexeme_end(buf) - state.line_start
+        line_offset: Sedlexing.lexeme_end(buf) - state.line_start,
     };
     /* Parse failure. Include current position string. */
-    fn parse_fail(mesg: &str) -> Result<(), CompilationError> {
+    fn parse_fail(mesg: &str) -> result::Result<(), CompilationError> {
     	token::fail_at(current_position(), mesg);
 	}
 	
@@ -294,7 +298,7 @@ pub fn tokenize(enclosing_kind: TokenGroupKind, name: CodeSource, mut buf: Strin
         };
 
         /* Recurse with blank code, and a new group_seed described by the arguments */
-        fn open_group(closure_kind: TokenClosureKind, group_kind: TokenGroupKind) -> Result<Token, Error> {
+        fn open_group(closure_kind: TokenClosureKind, group_kind: TokenGroupKind) -> result::Result<Token, Error> {
             proceed(
             	group_close_make_from(matched_lexemes()),
                 |l, cs| token::make_group(&current_position(), &closure_kind, &group_kind, l, cs),
@@ -308,26 +312,26 @@ pub fn tokenize(enclosing_kind: TokenGroupKind, name: CodeSource, mut buf: Strin
         
         // TODO: There has to be a better way of doing this.
         let case = Expr::Class(CharClass::new(vec![
-        	CharRange {begin: '"', end: '#'}, // covers ", #
-        	CharRange {begin: '(', end: ')'}, // covers (, )
-        	CharRange {begin: '[', end: ']'}, // covers [, \, ]
-        	CharRange {begin: '{', end: '{'}, // covers {
-        	CharRange {begin: '}', end: '}'}, // covers }
-        	CharRange {begin: '0', end: '9'}, // covers digit
+        	ClassRange {begin: '"', end: '#'}, // covers ", #
+        	ClassRange {begin: '(', end: ')'}, // covers (, )
+        	ClassRange {begin: '[', end: ']'}, // covers [, \, ]
+        	ClassRange {begin: '{', end: '{'}, // covers {
+        	ClassRange {begin: '}', end: '}'}, // covers }
+        	ClassRange {begin: '0', end: '9'}, // covers digit
         	// covers all letters
-        	CharRange {begin: 'a', end: 'z'},
-        	CharRange {begin: 'A', end: 'Z'},
+        	ClassRange {begin: 'a', end: 'z'},
+        	ClassRange {begin: 'A', end: 'Z'},
         	// covers all of sedlex's white_space
-        	CharRange {begin: '\t', end: '\r'},
-        	CharRange {begin: ' ', end: ' '},
-        	CharRange {begin: 0x85 as char, end: 0x85 as char},
-        	CharRange {begin: 0xa0 as char, end: 0xa0 as char},
-        	CharRange {begin: 0x1680 as char, end: 0x1680 as char},
-        	CharRange {begin: 0x2000 as char, end: 0x200a as char},
-        	CharRange {begin: 0x2028 as char, end: 0x2029 as char},
-        	CharRange {begin: 0x202f as char, end: 0x202f as char},
-        	CharRange {begin: 0x205f as char, end: 0x205f as char},
-        	CharRange {begin: 0x3000 as char, end: 0x3000 as char},
+        	ClassRange {begin: '\t', end: '\r'},
+        	ClassRange {begin: ' ', end: ' '},
+        	ClassRange {begin: 0x85 as char, end: 0x85 as char},
+        	ClassRange {begin: 0xa0 as char, end: 0xa0 as char},
+        	ClassRange {begin: 0x1680 as char, end: 0x1680 as char},
+        	ClassRange {begin: 0x2000 as char, end: 0x200a as char},
+        	ClassRange {begin: 0x2028 as char, end: 0x2029 as char},
+        	ClassRange {begin: 0x202f as char, end: 0x202f as char},
+        	ClassRange {begin: 0x205f as char, end: 0x205f as char},
+        	ClassRange {begin: 0x3000 as char, end: 0x3000 as char},
         ]));
 
         /* Now finally here's the actual grammar... */
@@ -395,7 +399,7 @@ pub fn tokenize(enclosing_kind: TokenGroupKind, name: CodeSource, mut buf: Strin
 
             /* On groups or closures, open a new parser (NO TCO AT THIS TIME) and add its result token to the current line */
             '(' => add_to_line_proceed(open_ordinary_group(TokenGroupKind::Plain)),
-            '{' => add_to_line_proceed(open_ordinary_groug(TokenGroupKind::Scoped)),
+            '{' => add_to_line_proceed(open_ordinary_group(TokenGroupKind::Scoped)),
             '[' => add_to_line_proceed(open_ordinary_group(TokenGroupKind::Box(BoxKind::NewObject))),
             a if a == case => add_single(TokenContents::Symbol),
             _ => Err(parse_fail("Unexpected character").unwrap_err()) /* Probably not possible? */
@@ -427,7 +431,7 @@ pub fn unwrap(token: Token) -> result::Result<CodeSequence, String> {
 	}
 }
 
-pub fn snippet(source: CodeSource, st: String) -> Result<CodeSequence, String> {
+pub fn snippet(source: CodeSource, st: String) -> result::Result<CodeSequence, String> {
     match tokenize_string(source, st) {
         Ok(v) => unwrap(v),       
         Err(e) => Err(format!("Internal error: Interpreter-internal code is invalid: {}", e)),

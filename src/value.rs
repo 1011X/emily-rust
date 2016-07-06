@@ -17,7 +17,7 @@ pub type TableValue = HashMap<Value, Value>;
 pub struct ClosureExecUser {
 	body      : token::CodeSequence,
 	scoped    : bool,  /* Should the closure execution get its own let scope? */
-	env_scope : Value, /* Captured scope environment of closure manufacture */
+	env_scope : Box<Value>, /* Captured scope environment of closure manufacture */
 	/* Another option would be to make the "new" scope early & excise 'key': */
 	key       : Vec<String>, /* Not-yet-curried keys, or [] as special for "this is nullary" -- BACKWARD, first-applied key is last */
 	has_return: bool,  /* Should the closure execution get its own "return" continuation? */
@@ -33,8 +33,8 @@ pub enum ClosureExec {
 pub enum ClosureThis {
 	Blank,                  /* Newly born closure */
 	Never,                  /* Closure is not a method and should not receive a this. */
-	Current(Value, Value),  /* Closure is a method, has a provisional current/this. */
-	Frozen(Value, Value),   /* Closure is a method, has a final, assigned current/this. */
+	Current(Box<Value>, Box<Value>),  /* Closure is a method, has a provisional current/this. */
+	Frozen(Box<Value>, Box<Value>),   /* Closure is a method, has a final, assigned current/this. */
 }
 
 pub struct ClosureValue {
@@ -118,6 +118,7 @@ impl fmt::Display for Value {
 
 /* The "registers" are values 1 and 2 described in execute.rs comments */
 /* The CodePositions are (1) the root of the current group (2) the symbol yielding "value 2" */
+#[derive(Clone)]
 pub enum RegisterState {
 	LineStart(Value, token::CodePosition),
 	FirstValue(Value, token::CodePosition, token::CodePosition),
@@ -126,7 +127,7 @@ pub enum RegisterState {
 
 impl fmt::Display for RegisterState {
 	/* Pretty print for RegisterState. */
-	pub fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match *self {
 			RegisterState::LineStart(ref v, _) =>
 				write!(f, "LineStart:{}", v),

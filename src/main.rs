@@ -8,12 +8,10 @@
 
 #[macro_use]
 extern crate lazy_static;
-extern crate regex_syntax;
-extern crate getopts;
 
 mod ocaml;
 
-mod arg_plus;
+//mod arg_plus;
 mod execute;
 mod internal_package;
 mod macros;
@@ -89,12 +87,12 @@ fn main() {
 		);
 		
 		match result {
-			Err (Error::Compilation (e)) => {
+			Err(Error::Compilation (e)) => {
 				writeln!(io::stderr(), "{}", e);
 				process::exit(1);
 			}
 			
-			Err (Error::Failure (e)) => {
+			Err(Error::Failure (e)) => {
 				writeln!(io::stderr(), "{}", e);
 				process::exit(1);
 			}

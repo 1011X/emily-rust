@@ -6,6 +6,7 @@ authors = [
 ]
 
 [dependencies]
+getopts = "0.2.14"
 regex = "0.1.41"
 lazy_static = "0.1.15"
 regex-syntax = "0.2.2"

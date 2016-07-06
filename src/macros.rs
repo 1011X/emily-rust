@@ -14,6 +14,7 @@ use token::{
     Token,
     TokenContents,
     TokenClosureKind,
+    TokenFailureKind,
     TokenGroup,
     TokenGroupKind,
     
@@ -21,7 +22,7 @@ use token::{
 };
 
 pub fn fail_at(at: &CodePosition, mesg: &str) -> token::CompilationError {
-    token::CompilationError(token::MacroError, at.clone(), mesg.to_owned())
+    token::CompilationError(TokenFailureKind::MacroError, at.clone(), mesg.to_owned())
 }
 
 pub fn fail_token(at: &Token, mesg: &str) -> token::CompilationError {
@@ -91,7 +92,7 @@ pub fn clone_group(at: &CodePosition, items: &[Vec<Token>]) -> Token {
 }
 
 /* Note: makes no-return closures */
-pub fn clone_closure(at: &CodePosition, i: &[Vec<Token>]) -> Token {
+pub fn clone_closure(at: &CodePosition, items: &[Vec<Token>]) -> Token {
     token::clone_group(at, &TokenClosureKind::ClosureWithBinding(false, vec![]), TokenGroupKind::Plain, &[], items)
 }
 
@@ -384,29 +385,27 @@ pub fn assignment(past: SingleLine, at: &CodePosition, future: SingleLine) -> Si
             /* Bindings exist: This is a function definition. */
             Some(bindings) => token::clone_group(
                 at,
-                TokenClosureKind::ClosureWithBinding (true, bindings.into_iter().rev().collect()),
+                TokenClosureKind::ClosureWithBinding(true, bindings),
                 TokenGroupKind::Plain,
                 vec![],
                 vec![process(future)]
             ),
         };
-
+        
         /* Recurse to try again with a different command. */
         /* TODO: This is all wrong... set should be default, let should be the extension.
            However this will require... something to allow [] to work right. */
         let mut cmd_at = at;
         let mut cmd = "let".to_owned();
-        let mut lookups = lookups;
         // CodePosition -> String -> SingleLine -> Result<SingleLine, CompilationError>
-        let result_for_command = |cmd_at, cmd, lookups| loop {
-            
+        let result_for_command = |mut cmd_at, mut cmd, mut lookups| loop {
             /* Done with bindings now, just have to figure out what we're assigning to */
-            match (*lookups, *cmd) {
+            match (*lookups, &*cmd) {
                 /* ...Nothing? */
                 ([], _) => return Err(token::fail_token(at, "Found a =, but nothing to assign to.").unwrap_err()),
 
                 /* Sorta awkward, detect the "nonlocal" prefix and swap out let. This should be generalized. */
-                ([ref more_lookups.., cmd_token @ Token {contents: TokenContents::Word(Cow::Borrowed("nonlocal")), ..}], "let") => {
+                ([ref more_lookups.., cmd_token @ Token {contents: TokenContents::Word(word), ..}], "let") if word == "nonlocal" => {
                     cmd_at = cmd_token;
                     cmd = value::SET_KEY_STRING.to_owned();
                     lookups = more_lookups.to_vec();
@@ -418,25 +417,25 @@ pub fn assignment(past: SingleLine, at: &CodePosition, future: SingleLine) -> Si
                     /* FIXME: Nothing now prevents assigning to a number in a plain scope? */
                     match token {
                         Token {contents: TokenContents::Word(name)} =>
-                            clone_atom(token, &name),
+                            clone_atom(token, name),
                         
-                        token => token,
+                        _ => token,
                     },
                     rightside
                 ]),
 
                 /* Looks like a b ... = c */
-                ([ref more_lookups.., first_token], _) => match *more_lookups {
-                    /* Note what's happening here: We're slicing off the FINAL element, first in the reversed list. */
-                    [ref middle_lookups.., final_token] => vec![
+                ([final_token, ref middle_lookups.., first_token], _) => {
+                    
+                    vec![
                         vec![first_token],
                         middle_lookups.into_iter().rev().collect(),
                         vec![clone_atom(cmd_at, cmd), final_token, rightside]
-                    ].flat_map(|t| t.into_iter()).collect(),
+                    ].flat_map(|t| t.into_iter()).collect()
+                }
 
                     /* Excluded by [{Token.word}] case above */
-                    _ => token::fail_token(at, "Internal failure: Reached impossible place"),
-                },
+                _ => token::fail_token(at, "Internal failure: Reached impossible place")
             }
         };
 
@@ -444,27 +443,32 @@ pub fn assignment(past: SingleLine, at: &CodePosition, future: SingleLine) -> Si
     };
 
     /* Parsing loop, build the lookups and bindings list */
-    fn process_left(remaining_left: SingleLine, lookups: SingleLine, bindings: Option<Vec<String>>) -> SingleLine {
+    // fn(SingleLine, SingleLine, Option<Vec<String>>) -> SingleLine
+    let process_left = |mut remaining_left, mut lookups, mut bindings| loop {
         match (*remaining_left, bindings) {
             /* If we see a ^, switch to loading bindings */
-            ([Token {contents: TokenContents::Symbol(Cow::Borrowed("^")), ..}, ref more_left..], None) =>
-                process_left(more_left, lookups, Some(vec![])),
+            ([Token {contents: TokenContents::Symbol(sym), ..}, ref more_left..], None) if sym == "^" =>
+                bindings = Some(vec![]),
 
             /* If we're already loading bindings, just skip it */
-            ([Token {contents: TokenContents::Symbol(Cow::Borrowed("^")), ..}, ref more_left..], _) =>
-                process_left(more_left, lookups, bindings),
+            ([Token {contents: TokenContents::Symbol(sym), ..}, ref more_left..], _) if sym == "^" => {}
 
             /* Sanitize any symbols that aren't cleared for the left side of an = */
             ([Token {contents: TokenContents::Symbol(ref x), ..}, ..], _) =>
-                ocaml::failwith(&format!("Unexpected symbol {} to left of = ", x)),
+                return ocaml::failwith(&format!("Unexpected symbol {} to left of = ", x)),
 
             /* We're adding bindings */
-            ([Token {contents: TokenContents::Word(ref b), ..}, ref rest_past..], Some(bindings)) =>
-                process_left(rest_past, lookups, Some(bindings.into_iter().chain(vec![b]).collect())),
+            ([Token {contents: TokenContents::Word(ref b), ..}, ref rest_past..], Some(bindings)) => {
+                remaining_left = rest_past.to_vec();
+                bindings.push(b);
+            }
 
             /* We're adding lookups */
-            ([l, ref rest_past..], None) =>
-                process_left(rest_past, lookups.into_iter().chain(vec![l]).collect(), None),
+            ([l, ref rest_past..], None) => {
+                remaining_left = rest_past.to_vec();
+                lookups.push(l);
+                bindings = None;
+            }
 
             /* There is no more past, Jump to result. */
             ([], _) => result(lookups, bindings),
@@ -472,45 +476,16 @@ pub fn assignment(past: SingleLine, at: &CodePosition, future: SingleLine) -> Si
             /* Apparently did something like 3 = */
             ([token, ..], _) => token::fail_token(token, &format!("Don't know what to do with {} to left of =", pretty::dump_code_tree_terse(token))),
         }
-    }
-
-    process_left(past.into_iter().rev().collect(), vec![], None)
+    };
+    
+    process_left(past, vec![], None)
 }
 
 /* Constructor for closure constructor, depending on whether return wanted. See manual.md */
 pub fn closure_construct(with_return: bool) -> MacroFunction {
     box move |past, at, future| {
         /* Scan line picking up bindings until group reached. */
-        fn open_closure(bindings: Vec<String>, future: SingleLine) -> SingleLine {
-            match *future {
-                /* If redundant ^s seen, skip them. */
-                [Token {contents: TokenContents::Symbol(Cow::Borrowed("^")), ..}, ref more_future..] =>
-                    open_closure(bindings, more_future.to_vec()),
-
-                /* This is a binding, add to list. */
-                [Token {contents: TokenContents::Word(ref b), ..}, ref more_future..] =>
-                    open_closure(bindings.into_iter().chain(vec![b]).collect(), more_future),
-                
-                /* This is a group, we are done now. */
-                [Token {contents: TokenContents::Group(TokenGroup {closure: TokenClosureKind::NonClosure, kind, group_initializer, items}), ..}, ref more_future..] =>
-                    match kind {
-                        /* They asked for ^[], unsupported. */
-                        TokenGroupKind::Box(_) =>
-                            token::fail_token(at, "Can't use object literal with ^"),
-                        /* Supported group */
-                        _ => arrange_token(at, past, token::clone_group(at, TokenClosureKind::ClosureWithBinding(with_return, bindings.into_iter().rev().collect()), kind, group_initializer, items), more_future.to_vec()),
-                    },
-                
-                /* Reached end of line */
-                [] => token::fail_token(at, "Body missing for closure"),
-
-                /* Any other symbol */
-                _ => token::fail_token(at, "Unexpected symbol after ^"),
-            }
-        }
-        
-        // TODO:
-        let open_closure = |bindings, mut future| loop {
+        let open_closure = |mut bindings, mut future| loop {
             match *future {
                 /* If redundant ^s seen, skip them. */
                 [Token {contents: TokenContents::Symbol(Cow::Borrowed("^")), ..}, ref more_future..] =>
@@ -528,7 +503,7 @@ pub fn closure_construct(with_return: bool) -> MacroFunction {
                         group_initializer,
                         items
                     }), ..
-                }, ref mut more_future..] => match kind {
+                }, ref more_future..] => match kind {
                         /* They asked for ^[], unsupported. */
                         TokenGroupKind::Box(_) =>
                             return token::fail_token(at, "Can't use object literal with ^"),

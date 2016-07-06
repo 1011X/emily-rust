@@ -1,13 +1,15 @@
 /* Parse and validate command line arguments. */
 
+extern crate getopts;
+
+use self::getopts::Options;
+
 use std::env;
 use std::io;
 use std::process;
 use std::ffi::OsString;
 use std::path::PathBuf;
 use std::sync::{Once, ONCE_INIT};
-
-use getopts::Options;
 
 //use arg_plus;
 
@@ -19,22 +21,22 @@ pub enum ExecutionTarget {
 
 pub struct OptionSpec {
 	/* Execution args */
-	target: Option<ExecutionTarget>,
-	args: Vec<String>,
-	repl: bool,
-	step_macro: bool,
-	trace: bool,
-	track_objects: bool,
-	trace_set: bool,
-	package_path: Option<PathBuf>,
-	project_path: Option<PathBuf>,
-	dont_need_targets: bool, /* Set indirectly by several options */
+	pub target: Option<ExecutionTarget>,
+	pub args: Vec<String>,
+	pub repl: bool,
+	pub step_macro: bool,
+	pub trace: bool,
+	pub track_objects: bool,
+	pub trace_set: bool,
+	pub package_path: Option<PathBuf>,
+	pub project_path: Option<PathBuf>,
+	pub dont_need_targets: bool, /* Set indirectly by several options */
 
 	/* Things to do instead of execution */
-	disassemble: bool,
-	disassemble_verbose: bool,
-	print_package: bool,
-	print_project: bool,
+	pub disassemble: bool,
+	pub disassemble_verbose: bool,
+	pub print_package: bool,
+	pub print_project: bool,
 }
 
 
