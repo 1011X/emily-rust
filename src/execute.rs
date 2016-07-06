@@ -76,7 +76,7 @@ pub fn new_state_for(register: RegisterState, av: AnchoredValue) -> RegisterStat
 
 /* Constructor for a new frame */
 pub fn start_register(at: CodePosition) -> RegisterState {
-    RegisterState::LineStart (Value::Null, at)
+    RegisterState::LineStart(Value::Null, at)
 }
 
 pub fn stack_frame(scope: Value, code: CodeSequence, at: CodePosition) -> ExecuteFrame {
@@ -88,7 +88,7 @@ pub fn stack_frame(scope: Value, code: CodeSequence, at: CodePosition) -> Execut
 }
 
 pub fn fail_with_stack(stack: ExecuteStack, mesg: String) -> Result <(), String> {
-    Err (format!("{}\n{}", mesg, value_util::stack_string(stack)))
+    Err(format!("{}\n{}", mesg, value_util::stack_string(stack)))
 }
 
 /* -- INTERPRETER MAIN LOOP -- */
@@ -269,9 +269,9 @@ pub fn evaluate_token_from_lines(context: ExecuteContext, stack: ExecuteStack, f
         [] => {
             /* Convert Value 1 to a LineStart value to persist to next line */
             let new_state = match frame.register {
-                RegisterState::LineStart (v, rat)
-                | RegisterState::FirstValue (v, rat, _) =>
-                    RegisterState::LineStart (v, rat),
+                RegisterState::LineStart(v, rat)
+                | RegisterState::FirstValue(v, rat, _) =>
+                    RegisterState::LineStart(v, rat),
                 _ => unreachable!(), /* Again: if PairValue, should have branched off above */
             };
             /* Replace current frame, new code sequence is rest-of-lines, and recurse */
@@ -280,7 +280,7 @@ pub fn evaluate_token_from_lines(context: ExecuteContext, stack: ExecuteStack, f
                 v.push(ExecuteFrame {
                     register: new_state,
                     code: more_lines,
-                    scope: frame.scope
+                    scope: frame.scope,
                 });
                 v
             })
@@ -311,7 +311,7 @@ pub fn return_to(context: ExecuteContext, stack_top: ExecuteStack, av: AnchoredV
                 v.push(ExecuteFrame {
                     register: new_state_for(parent_register, av),
                     code: parent_code,
-                    scope: parent_scope
+                    scope: parent_scope,
                 });
                 v
             })
@@ -329,7 +329,7 @@ pub fn evaluate_token_from_tokens(context: ExecuteContext, stack: ExecuteStack, 
         v.push(ExecuteFrame {
             register: register,
             code: more_line.iter().cloned().chained(vec![more_tokens]).collect(),
-            scope: frame.scope
+            scope: frame.scope,
         });
         v
     };
@@ -411,6 +411,7 @@ pub fn evaluate_token_from_tokens(context: ExecuteContext, stack: ExecuteStack, 
                 match *group.group_initializer {
                     /* For ordinary groups, it is known: */
                     [] => push_frame(None),
+                    
                     /* But groups with an initializer, we must evaluate code to get the scope: */
                     ref group_initializer => {
                         let handoff = |f, _| push_frame(Some(f));
@@ -499,8 +500,8 @@ pub fn apply(context: ExecuteContext, stack: ExecuteStack, this: Value, a: Value
                             let add_bound = |keys, values| loop {
                                 match (keys, values) {
                                     ([], []) => break,
-                                    ([rest_key.., key], [rest_value.., value]) =>
-                                        t.insert(Value::Atom (key), value),
+                                    ([ref rest_key.., key], [ref rest_value.., value]) =>
+                                        t.insert(Value::Atom(key), value),
                                     _ => unreachable!(),
                                 }
                             };
@@ -512,13 +513,13 @@ pub fn apply(context: ExecuteContext, stack: ExecuteStack, this: Value, a: Value
                             };
                             
                             match c.this {
-                                ClosureThis::Current(c, t) |
-                                ClosureThis::Frozen(c, t) => set_this(c, t),
+                                ClosureThis::Current(c, t)
+                                | ClosureThis::Frozen(c, t) => set_this(c, t),
                                 _ => {}
                             }
                             
-                            if let ClosureExec::User (ClosureExecUser {has_return: true, ..}) = c.exec {
-                                t.insert(*value::RETURN_KEY, Value::Continuation (stack, bat));
+                            if let ClosureExec::User(ClosureExecUser {has_return: true, ..}) = c.exec {
+                                t.insert(*value::RETURN_KEY, Value::Continuation(stack, bat));
                             }
                             
                             add_bound(key, bound);
@@ -549,13 +550,13 @@ pub fn apply(context: ExecuteContext, stack: ExecuteStack, this: Value, a: Value
                     };
                     match count {
                         1 => descend(amended_closure), /* Apply, using argument */
-                        _ => r(Value::Closure (amended_closure)), /* Simply curry and return. Don't descend stack. */
+                        _ => r(Value::Closure(amended_closure)), /* Simply curry and return. Don't descend stack. */
                     }
                 }
             }
         }
 
-        Value::Continuation (stack, _) => /* FIXME: Won't this be optimized out? */
+        Value::Continuation(stack, _) => /* FIXME: Won't this be optimized out? */
             return_to(context, stack, b),
 
         /* If applying a table or table op. */
@@ -570,13 +571,15 @@ pub fn apply(context: ExecuteContext, stack: ExecuteStack, this: Value, a: Value
         
         /* If applying a builtin special. */
         Value::BuiltinFunction(f) => r(match f(bv) {
-            Err(ocaml::Failure (e)) =>
+            Err(ocaml::Failure(e)) =>
                 fail_with_stack(stack, format!("Runtime error, applying builtin function to {}: {}", bv, e)),
             Err(e) => return Err(e),
             Ok(v) => v,
         }),
+        
         Value::BuiltinHandoff(f) => /* Note: No this included, so not for methods */
             f(context, stack, b),
+        
         /* Unworkable -- all builtin method values should be erased by readTable */
         Value::BuiltinMethod(_) | Value::BuiltinUnaryMethod(_) | Value::UserMethod(_) =>
             unreachable!(),

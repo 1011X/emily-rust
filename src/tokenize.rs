@@ -237,7 +237,7 @@ pub fn tokenize(enclosing_kind: TokenGroupKind, name: CodeSource, mut buf: Strin
     fn proceed<F>(group_close: GroupCloseRecord, group_seed: F, lines: Vec<Vec<Token>>, line: Vec<Token>) -> Result<Token> where
     F: Fn(Vec<Token>, CodeSequence) -> Token {
         /* Constructor for a token with the current preserved codeposition. */
-        let make_token_here = token::make_token(current_position());
+        let make_token_here = |contents| Token::new(current_position(), contents);
 
         /* Right now all group closers are treated as equivalent. TODO: Don't do it like this. */
         let close_pattern = Alternate (vec![
