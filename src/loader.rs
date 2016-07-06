@@ -32,7 +32,7 @@ use value_util::{
 
 /* Convert a filename to an atom key for a loader */
 /* FIXME: Refuse to process "unspeakable" atoms, like "file*name"? */
-pub fn name_atom(filename: String) -> Value {
+fn name_atom(filename: String) -> Value {
     Value::Atom(PathBuf::from(filename)
         /* If there is an extension remove it */
         /* If there is no extension do nothing */
@@ -46,7 +46,7 @@ pub fn name_atom(filename: String) -> Value {
 
 /* See also path.ml */
 lazy_static! {
-    pub static ref DEFAULT_PACKAGE_PATH: PathBuf = path::executable_relative_path(env!("BUILD_PACKAGE_DIR"));
+    static ref DEFAULT_PACKAGE_PATH: PathBuf = path::executable_relative_path(env!("BUILD_PACKAGE_DIR"));
 }
 
 pub fn package_root_path() -> PathBuf {
@@ -97,24 +97,24 @@ impl LoaderSource {
 /* Given a starter, make a new starter with a unique scope that is the child of the old starter's scope.
    Return both the starter and the new scope. */
 /* THIS COMMENT IS WRONG, FIX IT */
-pub fn sub_starter_with(starter: &ExecuteStarter, table: TableValue) -> ExecuteStarter {
+fn sub_starter_with(starter: &ExecuteStarter, table: TableValue) -> ExecuteStarter {
     ExecuteStarter {
         root_scope: Value::Table(table),
         ..*starter
     }
 }
 
-pub fn sub_starter_pair(kind: Option<TableBlankKind>, starter: ExecuteStarter) -> (TableValue, ExecuteStarter) {
+fn sub_starter_pair(kind: Option<TableBlankKind>, starter: ExecuteStarter) -> (TableValue, ExecuteStarter) {
     let table = value_util::table_inheriting(kind.unwrap_or(TableBlankKind::NoLet), starter.root_scope);
     (table, sub_starter_with(&starter, table))
 }
 
-pub fn box_sub_starter(starter: ExecuteStarter, kind: BoxSpec) -> ExecuteStarter {
+fn box_sub_starter(starter: ExecuteStarter, kind: BoxSpec) -> ExecuteStarter {
     sub_starter_with(starter, value_util::box_blank(kind, starter.root_scope))
 }
 
 /* Given a starter, make a new starter with a subscope and the requested project/directory. */
-pub fn starter_for_execute(starter: ExecuteStarter, project: Option<Value>, directory: Option<Value>) -> ExecuteStarter {
+fn starter_for_execute(starter: ExecuteStarter, project: Option<Value>, directory: Option<Value>) -> ExecuteStarter {
     let (table, sub_starter) = sub_starter_pair(None, starter);
     value::table_set_option(table, value::PROJECT_KEY, project);
     table.insert(
@@ -125,12 +125,12 @@ pub fn starter_for_execute(starter: ExecuteStarter, project: Option<Value>, dire
 }
 
 /* Loader is invoking execute internally to load a package from a file. */
-pub fn execute_package(starter: ExecuteStarter, project: Option<Value>, directory: Option<Value>, buf: Token) -> Value {
+fn execute_package(starter: ExecuteStarter, project: Option<Value>, directory: Option<Value>, buf: Token) -> Value {
     execute::execute(starter_for_execute(starter, project, directory), buf)
 }
 
 lazy_static! {
-    pub static ref PACKAGES_LOADED: HashMap<PathBuf, Value> = HashMap::new();
+    static ref PACKAGES_LOADED: HashMap<PathBuf, Value> = HashMap::new();
 }
 
 /* Create a package loader object. Will recursively call itself in a lazy way on field access.
@@ -140,14 +140,14 @@ lazy_static! {
          Maybe loading should be even lazier, such that load when a field is loaded *from* a file, load occurs?
          This would make prototype loading way easier. */
 /* FIXME: Couldn't kind be NewScope and the starter impose the box? */
-pub fn load_file(starter: ExecuteStarter, project_source: LoaderSource, directory: LoaderSource, path: String) -> Value {
+fn load_file(starter: ExecuteStarter, project_source: LoaderSource, directory: LoaderSource, path: String) -> Value {
     /* FIXME: What if known_filter is NoSource here? This is the "file where expected a directory" case. */
     let buf = tokenize::tokenize_channel(CodeSource::File(path), fs::File::open(path));
     
     execute_package(starter, project_source.known_filter(), directory.known_filter(), buf)
 }
 
-pub fn load_package_dir(starter: ExecuteStarter, project_source: LoaderSource, path: PathBuf) -> Value {
+fn load_package_dir(starter: ExecuteStarter, project_source: LoaderSource, path: PathBuf) -> Value {
     let directory_table = value_util::table_blank(TableBlankKind::NoSet);
     let directory_object = Value::Object(directory_table);
     let proceed = load_package(starter, project_source.directory_filter(directory_object), LoaderSource::Source (directory_object));
@@ -161,7 +161,7 @@ pub fn load_package_dir(starter: ExecuteStarter, project_source: LoaderSource, p
     directory_object
 }
 
-pub fn load_package(starter: ExecuteStarter, project_source: LoaderSource, directory: LoaderSource, path: PathBuf) -> Value {
+fn load_package(starter: ExecuteStarter, project_source: LoaderSource, directory: LoaderSource, path: PathBuf) -> Value {
     /* This is gonna do bad things on case-insensitive filesystems */
     PACKAGES_LOADED.get(path).unwrap_or_else(|| {
         /* COMMENT ME!!! This is not good enough. */
@@ -195,7 +195,7 @@ pub fn project_path_for_location(location: LoadLocation) -> PathBuf {
     }
 }
 
-pub fn project_for_location(starter: ExecuteStarter, default_location: LoadLocation) -> PathBuf {
+fn project_for_location(starter: ExecuteStarter, default_location: LoadLocation) -> PathBuf {
     load_package(starter, LoaderSource::SelfSource, LoaderSource::NoSource, project_path_for_location(default_location))
 }
 

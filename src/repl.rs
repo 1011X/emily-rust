@@ -22,19 +22,19 @@ use tokenize::Error;
 
 /* Predefined Emily code used by the REPL */
 lazy_static! {
-	pub static ref REPL_HELP_STRING: String = options::FULL_VERSION + ", interactive mode\
+	static ref REPL_HELP_STRING: String = options::FULL_VERSION + ", interactive mode\
 		Type \"help\" for help, \"quit\" to quit\
 		Type \"last\" to get the previous line's value";
 }
 
 /* Check if the string 's' ends with a backslash. */
 /* FIXME: This is inadequate, the tokenizer should report this itself. */
-pub fn is_continued(s: &str) -> bool {
+fn is_continued(s: &str) -> bool {
 	let n = s.len();
     n > 0 && s.ends_with('\\')
 }
 
-pub static LAST_KEY_STRING: &'static str = "last";
+static LAST_KEY_STRING: &'static str = "last";
 
 
 /* Runs the REPL.

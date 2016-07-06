@@ -19,20 +19,20 @@ use token::{
     CodePosition,
 };
 
-pub fn table_pair() -> (TableValue, Value) {
+fn table_pair() -> (TableValue, Value) {
     let table = value_util::table_blank(TableBlankKind::NoSet);
     let value = Value::Table (table);
     (table, value)
 }
 
 lazy_static! {
-    pub static ref TRUEFN_VALUE: Value = Value::BuiltinFunction(box |_| Value::True);
+    static ref TRUEFN_VALUE: Value = Value::BuiltinFunction(box |_| Value::True);
     
-    pub static ref INTERNAL_TABLE: TableValue = value_util::table_blank(TableBlankKind::NoSet);
+    static ref INTERNAL_TABLE: TableValue = value_util::table_blank(TableBlankKind::NoSet);
     pub static ref INTERNAL_VALUE: Value = Value::Table(INTERNAL_TABLE);
 }
 
-pub fn fake_register_location(name: &'static str) -> CodePosition {
+fn fake_register_location(name: &'static str) -> CodePosition {
     CodePosition {
         file_name: CodeSource::Internal(name),
         line_number: 0,
@@ -40,7 +40,7 @@ pub fn fake_register_location(name: &'static str) -> CodePosition {
     }
 }
 
-pub fn fake_register_from(reg: RegisterState) -> ExecuteFrame {
+fn fake_register_from(reg: RegisterState) -> ExecuteFrame {
     ExecuteFrame {
         register: reg,
         scope: Value::Null,
@@ -250,11 +250,11 @@ START.call_once(|| {
             let foreigner = ForeignWrap {
                 name: None,
                 args: vec![],
-                returning: "void".to_owned()
+                returning: "void".to_owned(),
             };
             let table = value_util::table_blank(TableBlankKind::NoSet);
             let set_ffi_param = |what, func| table.insert(Value::Atom(Cow::from(what)), Value::BuiltinFunction(box |a| match a {
-                Value::String(s) => {
+                Value::String(ref s) => {
                     func(s.clone());
                     Value::Null
                 }

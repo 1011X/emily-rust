@@ -51,17 +51,17 @@ use value::{
 type AnchoredValue = (Value, CodePosition);
 
 /* These three could technically move into value.rs but BuiltinObject depends on Value */
-pub fn scope_inheriting(kind: TableBlankKind, scope_parent: Value) -> Value {
+fn scope_inheriting(kind: TableBlankKind, scope_parent: Value) -> Value {
     Value::Table(value_util::table_inheriting(kind, scope_parent))
 }
 
-pub fn object_literal_scope(obj: BoxSpec, scope_parent: Value) -> Value {
+fn object_literal_scope(obj: BoxSpec, scope_parent: Value) -> Value {
     /* Should this be Value::Object or Value::Table, and *why*? */
     Value::Table(value_util::box_blank(obj, scope_parent))
 }
 
 /* Given a parent scope and a token creates an appropriate inner group scope */
-pub fn group_scope(context: ExecuteContext, token_kind: TokenGroupKind, scope: Value, initializer_value: Option<Value>) -> Value {
+fn group_scope(context: ExecuteContext, token_kind: TokenGroupKind, scope: Value, initializer_value: Option<Value>) -> Value {
     match token_kind {
         TokenGroupKind::Plain => initializer_value.unwrap_or(scope),
         
@@ -83,7 +83,7 @@ pub fn group_scope(context: ExecuteContext, token_kind: TokenGroupKind, scope: V
 /* Combine a value with an existing register var to make a new register var. */
 /* Flattens pairs, on the assumption if a pair is present we're returning their applied value, */
 /* so only call if we know this is not a pair already (unless we *want* to flatten) */
-pub fn new_state_for(register: RegisterState, av: AnchoredValue) -> RegisterState {
+fn new_state_for(register: RegisterState, av: AnchoredValue) -> RegisterState {
     match (register, av) {
         /* Either throw out a stale LineStart / PairValue and simply take the new value, */
         (RegisterState::LineStart(_, rat), (v, at)) |
@@ -97,11 +97,11 @@ pub fn new_state_for(register: RegisterState, av: AnchoredValue) -> RegisterStat
 }
 
 /* Constructor for a new frame */
-pub fn start_register(at: CodePosition) -> RegisterState {
+fn start_register(at: CodePosition) -> RegisterState {
     RegisterState::LineStart(Value::Null, at)
 }
 
-pub fn stack_frame(scope: Value, code: CodeSequence, at: CodePosition) -> ExecuteFrame {
+fn stack_frame(scope: Value, code: CodeSequence, at: CodePosition) -> ExecuteFrame {
     ExecuteFrame {
         register: start_register(at),
         code: code,
@@ -225,7 +225,7 @@ pub fn execute_step(context: ExecuteContext, stack: ExecuteStack) -> Value {
     }
 }
 
-pub fn execute_step_with_frames(context: ExecuteContext, stack: ExecuteStack, frame: ExecuteFrame, more_frames: Vec<ExecuteFrame>) -> Value {
+fn execute_step_with_frames(context: ExecuteContext, stack: ExecuteStack, frame: ExecuteFrame, more_frames: Vec<ExecuteFrame>) -> Value {
     /* Trace here ONLY if command line option requests it */
     if unsafe { options::RUN.trace } {
         print!("    Step");
@@ -263,7 +263,7 @@ pub fn execute_step_with_frames(context: ExecuteContext, stack: ExecuteStack, fr
     }
 }
 
-pub fn evaluate_token(context: ExecuteContext, stack: ExecuteStack, frame: ExecuteFrame, more_frames: Vec<ExecuteFrame>) -> Value {
+fn evaluate_token(context: ExecuteContext, stack: ExecuteStack, frame: ExecuteFrame, more_frames: Vec<ExecuteFrame>) -> Value {
     /* Look at code sequence in frame */
     match *frame.code {
         /* It's empty. We have reached the end of the group. */
@@ -284,7 +284,7 @@ pub fn evaluate_token(context: ExecuteContext, stack: ExecuteStack, frame: Execu
     }
 }
 
-pub fn evaluate_token_from_lines(context: ExecuteContext, stack: ExecuteStack, frame: ExecuteFrame, more_frames: Vec<ExecuteFrame>, line: Vec<Token>, more_lines: Vec<Vec<Token>>) -> Value {
+fn evaluate_token_from_lines(context: ExecuteContext, stack: ExecuteStack, frame: ExecuteFrame, more_frames: Vec<ExecuteFrame>, line: Vec<Token>, more_lines: Vec<Vec<Token>>) -> Value {
     /* Look at line in code sequence. */
     match *line {
         /* It's empty. We have reached the end of the line. */
@@ -344,7 +344,7 @@ pub fn return_to(context: ExecuteContext, stack_top: ExecuteStack, av: AnchoredV
 /* evaluateTokenFromTokens and apply are the functions that "do things"-- they
    define, ultimately, the meanings of the different kinds of tokens and values. */
 
-pub fn evaluate_token_from_tokens(context: ExecuteContext, stack: ExecuteStack, frame: ExecuteFrame, more_frames: Vec<ExecuteFrame>, line: Vec<Token>, more_lines: Vec<Vec<Token>>, token: Token, more_tokens: Vec<Token>) -> Value {
+fn evaluate_token_from_tokens(context: ExecuteContext, stack: ExecuteStack, frame: ExecuteFrame, more_frames: Vec<ExecuteFrame>, line: Vec<Token>, more_lines: Vec<Vec<Token>>, token: Token, more_tokens: Vec<Token>) -> Value {
     /* Helper: Given a value, and knowing register state, make a new register state and recurse */
     let stack_with_register = |register| {
         let mut v = more_frames.clone();
@@ -457,7 +457,7 @@ pub fn evaluate_token_from_tokens(context: ExecuteContext, stack: ExecuteStack, 
 }
 
 /* apply item a to item b and return it to the current frame */
-pub fn apply(context: ExecuteContext, stack: ExecuteStack, this: Value, a: Value, b: AnchoredValue) -> Result<(), ()> {
+fn apply(context: ExecuteContext, stack: ExecuteStack, this: Value, a: Value, b: AnchoredValue) -> Result<(), ()> {
     /* FIXME: Document what *exactly* is the definition of b/bat? */
     let (bv, bat) = b;
     let r = |v| return_to(context, stack, (v, bat));

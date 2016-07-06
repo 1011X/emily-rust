@@ -45,17 +45,17 @@ type Result<T> = result::Result<T, Error>;
 /* Tokenize uses sedlex which is inherently stateful, so tokenize for a single source string is stateful.
    This is the basic state for a file parse-- it basically just records the position of the last seen newline. */
 
-pub struct TokenizeState {
+struct TokenizeState {
 	line_start: isize,
 	line: isize
 }
 
 #[derive(Clone, Copy)]
-pub enum GroupCloseToken { Eof, Char(char) }
+enum GroupCloseToken { Eof, Char(char) }
 
-pub type GroupCloseRecord = (GroupCloseToken, CodePosition);
+type GroupCloseRecord = (GroupCloseToken, CodePosition);
 
-pub fn group_close_human_readable(kind: &GroupCloseToken) -> String {
+fn group_close_human_readable(kind: &GroupCloseToken) -> String {
 	match *kind {
 		GroupCloseToken::Eof => "end of file".to_owned(),
 		GroupCloseToken::Char(c) => format!("\"{}\"", c),
@@ -424,7 +424,7 @@ pub fn tokenize_string(source: CodeSource, string: String) -> Result<Token> {
     tokenize(TokenGroupKind::Plain, source, lexbuf)
 }
 
-pub fn unwrap(token: Token) -> result::Result<CodeSequence, String> {
+fn unwrap(token: Token) -> result::Result<CodeSequence, String> {
 	match token.contents {
 		TokenContents::Group(g) => Ok(g.items),
 		_ => Err(format!("Internal error: Object in wrong place {}", token.at))

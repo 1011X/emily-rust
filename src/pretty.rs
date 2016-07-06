@@ -121,7 +121,7 @@ fn angle_wrap(s: &str) -> String {
     format!("<{}>", s)
 }
 
-pub fn id_string_for_table(t: &TableValue) -> String {
+fn id_string_for_table(t: &TableValue) -> String {
     match t.get(value::ID_KEY) {
         None => "UNKNOWN".to_owned(),
         
@@ -131,7 +131,7 @@ pub fn id_string_for_table(t: &TableValue) -> String {
     }
 }
 
-pub fn id_string_for_value(v: &Value) -> String {
+fn id_string_for_value(v: &Value) -> String {
     match *v {
         Value::Table(ref t) | Value::Object(ref t) =>
             id_string_for_table(t),
@@ -179,7 +179,7 @@ pub fn label_wrapper(label: &str, obj: &Value) -> String {
 
 /* FIXME: The formatting here is not even a little bit generalized. */
 
-pub fn dump_value_unwrapped_table(t: &TableValue) -> String {
+fn dump_value_unwrapped_table(t: &TableValue) -> String {
     " = [\n            ".to_owned()
     + &t.iter()
         .map(|&(v1, v2)| format!("{} = {}", v1, v2))
@@ -188,7 +188,7 @@ pub fn dump_value_unwrapped_table(t: &TableValue) -> String {
     + "\n        ]"
 }
 
-pub fn dump_value_table(v: &Value) -> String {
+fn dump_value_table(v: &Value) -> String {
     v.to_string() + match *v {
         Value::Table(ref t) | Value::Object(ref t) =>
             &dump_value_unwrapped_table(t),
@@ -220,13 +220,13 @@ pub fn dump_value_for_user(v: &Value) -> String {
 /* Also, shouldn't more of this be exposed to code? */
 
 /* Should the REPL show a key/value pair? if not hide it. */
-pub fn should_show_item(&&(k, _): &&(&Value, &Value)) -> bool {
+fn should_show_item(&&(k, _): &&(&Value, &Value)) -> bool {
     ![value::PARENT_KEY, value::HAS_KEY, value::SET_KEY, value::LET_KEY]
         .contains(k)
 }
 
 /* Sort items in objects/tables by key name */
-pub fn sort_items(&(k1, v1): &(&Value, &Value), &(k2, v2): &(&Value, &Value)) -> Ordering {
+fn sort_items(&(k1, v1): &(&Value, &Value), &(k2, v2): &(&Value, &Value)) -> Ordering {
     match (*k1, *k2) {
         (Value::Atom(s1), Value::Atom(s2)) => s1.cmp(s2),
         (Value::Atom(_), _) => Ordering::Less,
@@ -237,7 +237,7 @@ pub fn sort_items(&(k1, v1): &(&Value, &Value), &(k2, v2): &(&Value, &Value)) ->
 }
 
 /* Display the key atom -- special-cased to avoid using a dot, since defns don't use them */
-pub fn display_key(k: &Value) -> String {
+fn display_key(k: &Value) -> String {
     match *k {
         Value::Atom(ref s) => s.clone(),
         Value::Float(n) => format!("<{}>", n),
@@ -246,7 +246,7 @@ pub fn display_key(k: &Value) -> String {
 }
 
 /* (Optionally) truncate a string and append a suffix */
-pub fn truncate(mut s: String, limit_at: usize, reduce_to: usize, suffix: &str) -> String {
+fn truncate(mut s: String, limit_at: usize, reduce_to: usize, suffix: &str) -> String {
     if s.len() > limit_at {
         s.truncate(reduce_to);
         s + suffix
@@ -255,7 +255,7 @@ pub fn truncate(mut s: String, limit_at: usize, reduce_to: usize, suffix: &str) 
 }
 
 /* Provide a compact view of tables/objects for the REPL */
-pub fn display_table(t: &TableValue) -> String {
+fn display_table(t: &TableValue) -> String {
     let items = t.iter()
         .cloned()
         .collect::<Vec<_>>()
