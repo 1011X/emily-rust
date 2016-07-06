@@ -23,11 +23,11 @@ use value::{
 /* --- Code printers --- */
 
 /* "Disassemble" a token tree into a human-readable string (specializable) */
-pub fn dump_code_tree_general(group_printer: fn(&Token, String, String, CodeSequence) -> String, token: &Token) -> String {
+fn dump_code_tree_general(group_printer: fn(&Token, String, String, CodeSequence) -> String, token: &Token) -> String {
     match token.contents {
     /* For a simple (nongrouping) token, return a string for just the item */
-        TokenContents::Word(ref x) |
-        TokenContents::Symbol(ref x) => x.to_string(),
+        TokenContents::Word(ref x)
+        | TokenContents::Symbol(ref x) => x.to_owned(),
         TokenContents::String(ref x) => format!("\"{}\"", x),
         TokenContents::Atom(ref x) => format!(".{}", x),
         TokenContents::Number(x) => x.to_string(),
@@ -92,25 +92,12 @@ pub fn dump_code_tree_dense(token: &Token) -> String {
     dump_code_tree_general(group_printer, token)
 }
 
-/* Pretty print for RegisterState. */
-pub fn dump_register_state(register_state: &RegisterState) -> String {
-    match *register_state {
-        RegisterState::LineStart (ref v, _) =>
-            format!("LineStart:{}", v),
-        
-        RegisterState::FirstValue (ref v, _) =>
-            format!("FirstValue:{}", v),
-        
-        RegisterState::PairValue (ref v1, ref v2, _, _) =>
-            format!("PairValue:{},{}", v1, v2),
-    }
-}
-
 /* --- Value printers --- */
 
 /* Re-escape string according to the Emily reader's rules */
-pub fn escape_string(s: &str) -> String {
-    let mut sb = String::with_capacity(s.len() + 2);
+// maybe this could be replaced with escape_default() ?
+fn escape_string(s: &str) -> String {
+    let mut sb = String::with_capacity(s.len() + 2); // best guess
     
     sb.push('"');
     
@@ -121,7 +108,7 @@ pub fn escape_string(s: &str) -> String {
                 sb.push(c);
             }
             '\n' => sb.push_str("\\n"),
-            c => sb.push(c),
+            _ => sb.push(c),
         }
     }
     
@@ -130,7 +117,7 @@ pub fn escape_string(s: &str) -> String {
     sb
 }
 
-pub fn angle_wrap(s: &str) -> String {
+fn angle_wrap(s: &str) -> String {
     format!("<{}>", s)
 }
 
@@ -182,11 +169,11 @@ pub fn simple_wrapper(label: &str, obj: &Value) -> String {
 }
 
 pub fn label_wrapper(label: &str, obj: &Value) -> String {
-    angle_wrap(match *obj {
+    angle_wrap(&match *obj {
         Value::Table(ref t) | Value::Object(ref t) =>
-            &format!("{}:{}", label, id_string_for_table(t)),
+            format!("{}:{}", label, id_string_for_table(t)),
         
-        _ => label,
+        _ => label.to_owned(),
     })
 }
 
@@ -279,7 +266,7 @@ pub fn display_table(t: &TableValue) -> String {
     
     let f = |&(k, v)| display_key(k) + " = " + &repl_display(v, false);
     
-    let out = match &*ordered.map(f).collect::<Vec<_>>() {
+    let out = match *ordered.map(f).collect::<Vec<_>>() {
         [] => "[...]".to_owned(),
         toks => format!("[{}; ...]", toks.join("; ")),
     };
@@ -296,7 +283,8 @@ pub fn repl_display(value: &Value, recurse: bool) -> String {
         Value::String(ref s) => escape_string(s),
         Value::Atom(ref s) => format!(".{}", s),
         Value::Table(ref t) | Value::Object(ref t) =>
-            if recurse { display_table(t) } else { "<object>".to_owned() },
+            if recurse { display_table(t) }
+            else { "<object>".to_owned() },
         _ => dump_value_for_user(value),
     }
 }

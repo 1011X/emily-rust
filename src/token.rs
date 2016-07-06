@@ -40,8 +40,8 @@ pub struct CodePosition {
 
 /* Make CodePosition human-readable */
 impl fmt::Display for CodePosition {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Display {
-		f.write_fmt(format_args!("[{} line {} ch {}]", self.file_name, self.line_number, self.line_offset))
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(f, "[{} line {} ch {}]", self.file_name, self.line_number, self.line_offset)
 	}
 }
 

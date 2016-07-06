@@ -11,21 +11,21 @@ use options;
 use path;
 use tokenize;
 use token::{
-	Token,
-	CodeSource,
+    Token,
+    CodeSource,
 };
 use value::{
-	self,
-	Value,
-	ExecuteStarter,
-	ExecuteContext,
-	TableValue,
-	TableBlankKind,
+    self,
+    Value,
+    ExecuteStarter,
+    ExecuteContext,
+    TableValue,
+    TableBlankKind,
 };
 use value_util::{
-	self,
-	BoxTarget,
-	BoxSpec,
+    self,
+    BoxTarget,
+    BoxSpec,
 };
 
 /* File handling utilities */
@@ -33,59 +33,64 @@ use value_util::{
 /* Convert a filename to an atom key for a loader */
 /* FIXME: Refuse to process "unspeakable" atoms, like "file*name"? */
 pub fn name_atom(filename: String) -> Value {
-    /* If there is an extension remove it */
-    /* If there is no extension do nothing */
-	Value::Atom (PathBuf::from(filename)
-		.file_stem()
-		.unwrap()
-		.to_str()
-		.unwrap()
-		.to_string()
-	)
+    Value::Atom(PathBuf::from(filename)
+        /* If there is an extension remove it */
+        /* If there is no extension do nothing */
+        .file_stem()
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_owned()
+    )
 }
 
 /* See also path.ml */
 lazy_static! {
-	pub static ref DEFAULT_PACKAGE_PATH: PathBuf = path::executable_relative_path(env!("BUILD_PACKAGE_DIR"));
+    pub static ref DEFAULT_PACKAGE_PATH: PathBuf = path::executable_relative_path(env!("BUILD_PACKAGE_DIR"));
 }
 
 pub fn package_root_path() -> PathBuf {
-    match options::RUN.package_path {
-    	Some(ref s) => s.clone(),
-    	_ => DEFAULT_PACKAGE_PATH.clone(),
-	}
-}
-
-/* What should the target of this particular loader be? */
-pub enum LoaderSource {
-    NoSource,                  /* I don't want the loader */
-    SelfSource,                /* I want the loader inferred from context */
-    Source(Value),            /* I want it to load from a specific path */
+    unsafe {
+        match options::RUN.package_path {
+            Some(ref s) => s.clone(),
+            _ => DEFAULT_PACKAGE_PATH.clone(),
+        }
+    }
 }
 
 /* From what source should the project/directory loaders for this execution come? */
 pub enum LoadLocation {
     Cwd,            /* From the current working directory */
-    Path(String),  /* From a known location */
+    Path(PathBuf),   /* From a known location */
 }
 
-/* Given a loaderSource and a known context path, eliminate the SelfSource case */
-pub fn self_filter(this: Value, source: LoaderSource) -> LoaderSource {
-	match source {
-		LoaderSource::SelfSource => LoaderSource::Source(this),
-		_ => source,
-	}
+/* What should the target of this particular loader be? */
+enum LoaderSource {
+    NoSource,                  /* I don't want the loader */
+    SelfSource,                /* I want the loader inferred from context */
+    Source(Value),             /* I want it to load from a specific path */
 }
 
-/* Given a pre-selfFiltered loaderSource, convert to an option. */
-/* FIXME: Should the error state (SelfSource) instead be an allowed case? */
-pub fn known_filter(source: LoaderSource) -> Option<Value> {
-	match source {
-		LoaderSource::NoSource => None,
-		LoaderSource::Source(x) => Some(x),
-		_ => ocaml::failwith("Internal error: Package loader attempted to load a file as if it were a directory"),
-	}
+impl LoaderSource {
+    /* Given a LoaderSource and a known context path, eliminate the SelfSource case */
+    fn self_filter(self, this: Value) -> Self {
+        match self {
+            LoaderSource::SelfSource => LoaderSource::Source(this),
+            _ => self,
+        }
+    }
+
+    /* Given a pre-`self_filter`ed LoaderSource, convert to an Option. */
+    /* FIXME: Should the error state (SelfSource) instead be an allowed case? */
+    fn known_filter(self) -> Option<Value> {
+        match source {
+            LoaderSource::NoSource => None,
+            LoaderSource::Source(x) => Some(x),
+            _ => panic!("Internal error: Package loader attempted to load a file as if it were a directory")
+        }
+    }
 }
+
 /* There is one "base" starter plus one substarter for each file executed.
    The base starter lacks a project/directory, the others have it. */
 
@@ -94,14 +99,14 @@ pub fn known_filter(source: LoaderSource) -> Option<Value> {
 /* THIS COMMENT IS WRONG, FIX IT */
 pub fn sub_starter_with(starter: &ExecuteStarter, table: TableValue) -> ExecuteStarter {
     ExecuteStarter {
-    	root_scope: Value::Table (table),
-    	..starter
-	}
+        root_scope: Value::Table(table),
+        ..*starter
+    }
 }
 
 pub fn sub_starter_pair(kind: Option<TableBlankKind>, starter: ExecuteStarter) -> (TableValue, ExecuteStarter) {
     let table = value_util::table_inheriting(kind.unwrap_or(TableBlankKind::NoLet), starter.root_scope);
-    (table, sub_starter_with(starter, table))
+    (table, sub_starter_with(&starter, table))
 }
 
 pub fn box_sub_starter(starter: ExecuteStarter, kind: BoxSpec) -> ExecuteStarter {
@@ -112,10 +117,10 @@ pub fn box_sub_starter(starter: ExecuteStarter, kind: BoxSpec) -> ExecuteStarter
 pub fn starter_for_execute(starter: ExecuteStarter, project: Option<Value>, directory: Option<Value>) -> ExecuteStarter {
     let (table, sub_starter) = sub_starter_pair(None, starter);
     value::table_set_option(table, value::PROJECT_KEY, project);
-    table.insert(value::DIRECTORY_KEY, match directory {
-		Some (d) => d,
-		None => Value::Table (value_util::table_blank(TableBlankKind::NoSet)),
-	});
+    table.insert(
+        value::DIRECTORY_KEY,
+        directory.unwrap_or(Value::Table(value_util::table_blank(TableBlankKind::NoSet)))
+    );
     sub_starter
 }
 
@@ -125,7 +130,7 @@ pub fn execute_package(starter: ExecuteStarter, project: Option<Value>, director
 }
 
 lazy_static! {
-	pub static ref PACKAGES_LOADED: HashMap<PathBuf, Value> = HashMap::new();
+    pub static ref PACKAGES_LOADED: HashMap<PathBuf, Value> = HashMap::new();
 }
 
 /* Create a package loader object. Will recursively call itself in a lazy way on field access.
@@ -139,21 +144,20 @@ pub fn load_file(starter: ExecuteStarter, project_source: LoaderSource, director
     /* FIXME: What if known_filter is NoSource here? This is the "file where expected a directory" case. */
     let buf = tokenize::tokenize_channel(CodeSource::File(path), fs::File::open(path));
     
-    execute_package(starter, known_filter(project_source), known_filter(directory), buf)
+    execute_package(starter, project_source.known_filter(), directory.known_filter(), buf)
 }
 
 pub fn load_package_dir(starter: ExecuteStarter, project_source: LoaderSource, path: PathBuf) -> Value {
     let directory_table = value_util::table_blank(TableBlankKind::NoSet);
-    let directory_object = Value::Object (directory_table);
-    let directory_filter = self_filter(directory_object);
-    let proceed = load_package(starter, directory_filter(project_source), LoaderSource::Source (directory_object));
+    let directory_object = Value::Object(directory_table);
+    let proceed = load_package(starter, project_source.directory_filter(directory_object), LoaderSource::Source (directory_object));
     
     for name in path.read_dir() {
-    	let mut pathname = path.clone();
-    	pathname.push(name);
+        let mut pathname = path.clone();
+        pathname.push(name);
         value_util::table_set_lazy(directory_table, name_atom(name), |_| proceed(pathname));
-	}
-	
+    }
+    
     directory_object
 }
 
@@ -162,14 +166,14 @@ pub fn load_package(starter: ExecuteStarter, project_source: LoaderSource, direc
     PACKAGES_LOADED.get(path).unwrap_or_else(|| {
         /* COMMENT ME!!! This is not good enough. */
         let v = if path == PathBuf::from("") {
-        	Value::Table (value_util::table_blank(TableBlankKind::NoSet))
+            Value::Table(value_util::table_blank(TableBlankKind::NoSet))
         }
         else if path.is_dir() {
             load_package_dir(starter, project_source, path)
         }
         else {
             let package_scope = Value::Table (value_util::table_blank(TableBlankKind::NoSet));
-            load_file(box_sub_starter(starter, BoxSpec::Populating (BoxTarget::Package, package_scope)), project_source, directory, path);
+            load_file(box_sub_starter(starter, BoxSpec::Populating(BoxTarget::Package, package_scope)), project_source, directory, path);
             package_scope
         };
         
@@ -183,11 +187,11 @@ pub fn load_package(starter: ExecuteStarter, project_source: LoaderSource, direc
 /* Return the value for the project loader. Needs to know "where" the project is. */
 pub fn project_path_for_location(location: LoadLocation) -> PathBuf {
     match options::RUN.project_path {
-        Some (ref p) => p.clone(),
+        Some(ref p) => p.clone(),
         None => match location {
-        	LoadLocation::Cwd => path::BOOT_PATH.clone(),
-        	LoadLocation::Path (p) => p,
-    	},
+            LoadLocation::Cwd => path::BOOT_PATH.clone(),
+            LoadLocation::Path(p) => p,
+        },
     }
 }
 
@@ -197,23 +201,23 @@ pub fn project_for_location(starter: ExecuteStarter, default_location: LoadLocat
 
 /* For external use: Given a file, get the load_location it would be executed within. */
 pub fn location_around(path: PathBuf) -> LoadLocation {
-    LoadLocation::Path (path.parent().unwrap().to_path_buf())
+    LoadLocation::Path(path.parent().unwrap().to_path_buf())
 }
 
 /* External entry point: Build a starter */
 pub fn complete_starter(with_project_location: LoadLocation) -> ExecuteStarter {
     let root_scope = value_util::table_blank(TableBlankKind::NoSet);
-    let nv = || Value::Table (value_util::table_blank(TableBlankKind::NoSet)); /* "New value" */
+    let nv = || Value::Table(value_util::table_blank(TableBlankKind::NoSet)); /* "New value" */
     let package_starter = ExecuteStarter {
-    	root_scope: Value::Table (root_scope),
-    	context: ExecuteContext {
-		    null_proto: nv(),
-		    true_proto: nv(),
-		    float_proto: nv(),
-		    string_proto: nv(),
-		    atom_proto: nv(),
-		    object_proto: nv(),
-	    },
+        root_scope: Value::Table(root_scope),
+        context: ExecuteContext {
+            null_proto: nv(),
+            true_proto: nv(),
+            float_proto: nv(),
+            string_proto: nv(),
+            atom_proto: nv(),
+            object_proto: nv(),
+        },
     };
     let package_path = package_root_path();
     let package = load_package(package_starter, LoaderSource::NoSource, LoaderSource::NoSource, package_path);
@@ -222,12 +226,12 @@ pub fn complete_starter(with_project_location: LoadLocation) -> ExecuteStarter {
         /* TODO find some way to make this not assume path loaded from disk */
         let mut path = package_path.clone();
         
-        for dirname in &["emily", "core", "prototype", &(path_key + ".em")] {
-        	path.push(dirname);
-    	}
-    	
-    	//path.push(&(path_key + ".em"));
-    	
+        for dirname in &["emily", "core", "prototype"] {
+            path.push(dirname);
+        }
+        
+        path.push(path_key + ".em");
+        
         let enclosing = load_package_dir(package_starter, LoaderSource::NoSource, path.parent().unwrap());
         load_file(
             box_sub_starter(package_starter, BoxSpec::Populating(BoxTarget::Package, proto)),
@@ -247,7 +251,7 @@ pub fn complete_starter(with_project_location: LoadLocation) -> ExecuteStarter {
     populate_proto(package_starter.context.atom_proto,   "atom");
     populate_proto(package_starter.context.object_proto, "object");
     let project = project_for_location(package_starter, with_project_location);
-    let (scope, starter) = sub_starter_pair(Some (TableBlankKind::WithLet), package_starter);
+    let (scope, starter) = sub_starter_pair(Some(TableBlankKind::WithLet), package_starter);
     scope.insert(value::PROJECT_KEY,   project);
     scope.insert(value::DIRECTORY_KEY, project);
     starter

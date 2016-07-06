@@ -124,6 +124,22 @@ pub enum RegisterState {
 	PairValue(Value, Value, token::CodePosition, token::CodePosition)
 }
 
+impl fmt::Display for RegisterState {
+	/* Pretty print for RegisterState. */
+	pub fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		match *self {
+			RegisterState::LineStart(ref v, _) =>
+				write!(f, "LineStart:{}", v),
+		
+			RegisterState::FirstValue(ref v, _) =>
+				write!(f, "FirstValue:{}", v),
+		
+			RegisterState::PairValue(ref v1, ref v2, _, _) =>
+				write!(f, "PairValue:{},{}", v1, v2),
+		}
+	}
+}
+
 /* Each frame on the stack has the two value "registers" and a codeSequence reference which
    is effectively an instruction pointer. */
 pub struct ExecuteFrame {
