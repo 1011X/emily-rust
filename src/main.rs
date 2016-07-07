@@ -32,9 +32,10 @@ use token::CodeSource;
 use loader::LoadLocation;
 use tokenize::Error;
 
-use std::fs;
 use std::io;
 use std::process;
+use std::fs::File;
+use std::io::Write;
 
 fn main() {
 	options::init();
@@ -43,7 +44,7 @@ fn main() {
         let buf = match target {
             ExecutionTarget::File(f) =>
             	// TODO: handle .unwrap() assertion below
-            	tokenize::tokenize_channel(CodeSource::File(f), fs::File::open(f).unwrap()),
+            	tokenize::tokenize_channel(CodeSource::File(f), File::open(f).unwrap()),
         	
             ExecutionTarget::Stdin =>
             	tokenize::tokenize_channel(CodeSource::Stdin, io::stdin()),
@@ -87,12 +88,12 @@ fn main() {
 		);
 		
 		match result {
-			Err(Error::Compilation (e)) => {
+			Err(Error::Compilation(e)) => {
 				writeln!(io::stderr(), "{}", e);
 				process::exit(1);
 			}
 			
-			Err(Error::Failure (e)) => {
+			Err(Error::Failure(e)) => {
 				writeln!(io::stderr(), "{}", e);
 				process::exit(1);
 			}
