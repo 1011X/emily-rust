@@ -11,6 +11,7 @@ use std::io;
 use std::result;
 use std::borrow::Cow;
 
+use nom;
 use self::regex_syntax::{
     Expr,
     Repeater,
@@ -117,11 +118,13 @@ pub fn tokenize(enclosing_kind: TokenGroupKind, name: CodeSource, mut buf: Strin
        but this means we have to do a reverse operation to seal the stack at the end. */
     // XXX: should never run because `Vec`s append elements at the end rather than the
     // beginning.
+    /*
     let cleanup = |l| {
         let lt = l.clone();
         lt.reverse();
         lt
     };
+    */
 
     /* Individual lines get a more special cleanup so macro processing can occur */
     let complete_line = |l| {
@@ -154,7 +157,7 @@ pub fn tokenize(enclosing_kind: TokenGroupKind, name: CodeSource, mut buf: Strin
     let incomplete_fail = |mesg| token::incomplete_at(current_position(), mesg);
 
     /* -- Parsers -- */
-
+    
     /* Sub-parser: double-quoted strings. Call after seeing opening quote mark */
     let quoted_string = || {
         
@@ -273,7 +276,7 @@ pub fn tokenize(enclosing_kind: TokenGroupKind, name: CodeSource, mut buf: Strin
         let new_line_proceed = || proceed_with_lines(lines_plus_line(), vec![]);
 
         /* Complete processing the current group by completing the current codeSequence & feeding it to the groupSeed. */
-        let close_group = |cs| group_seed(cleanup(lines_plus_line()), cs);
+        let close_group = |cs| group_seed(lines_plus_line(), cs);
 
         /* Helper: Given a string->tokenContents mapping, make the token, add it to the line and recurse */
         fn add_single<F: Fn(String) -> TokenContents>(constructor: F) -> Vec<Token> {
