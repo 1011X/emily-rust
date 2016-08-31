@@ -79,20 +79,20 @@ pub struct TokenGroup {
 
 /* Data content of a token */
 #[derive(Clone)]
-pub enum TokenContents {
-	Word(Cow<'static, str>),   /* Alphanum */
-	Symbol(Cow<'static, str>), /* Punctuation-- appears pre-macro only. */
-	String(Cow<'static, str>), /* "Quoted" */
-	Atom(Cow<'static, str>),   /* Ideally appears post-macro only */
+pub enum TokenContents<'a> {
+	Word(Cow<'a, str>),   /* Alphanum */
+	Symbol(Cow<'a, str>), /* Punctuation-- appears pre-macro only. */
+	String(String), /* "Quoted" */
+	Atom(Cow<'a, str>),   /* Ideally appears post-macro only */
 	Number(f64),
 	Group(TokenGroup),
 }
 
 /* A token. Effectively, an AST node. */
 #[derive(Clone)]
-pub struct Token {
+pub struct Token<'a> {
 	at: CodePosition,
-	contents: TokenContents,
+	contents: TokenContents<'a>,
 }
 
 /* Quick constructor for token, group type */
@@ -163,8 +163,7 @@ impl fmt::Display for CompilationError {
 	
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		let CompilationError(_, ref at, ref mesg) = *self;
-		
-		f.write_fmt(format_args!("Fatal error: {} {}", mesg, at))
+		write!(f, "Fatal error: {} {}", mesg, at)
 	}
 }
 
