@@ -10,12 +10,6 @@ use std::result;
 use std::borrow::Cow;
 
 use nom;
-use self::regex_syntax::{
-    Expr,
-    Repeater,
-    CharClass,
-    ClassRange,
-};
 
 use macros;
 use options;
@@ -67,7 +61,7 @@ pub fn tokenize(enclosing_kind: TokenGroupKind, name: CodeSource, mut buf: Strin
     named!(hex_number, re_bytes_find!("^0x[:xdigit:]+"));
     named!(binary_number, re_bytes_find!("^0b[01]+"));
     named!(word_pattern, re_bytes_find!("^[:alpha:][:alnum:]*"));
-    named!(float_pattern, re_bytes_find!("^(\.[:digit:]+|[:digit:]+(\.[:digit:])?([eE][-+]?[:digit:]+)?)"));
+    named!(float_pattern, re_bytes_find!(r"^(\.[:digit:]+|[:digit:]+(\.[:digit:])?([eE][-+]?[:digit:]+)?)"));
     
     named!(number_pattern<f64>, alt!(
         hex_number => { |i| {
@@ -83,6 +77,28 @@ pub fn tokenize(enclosing_kind: TokenGroupKind, name: CodeSource, mut buf: Strin
     ));
     
     named!(comment, re_bytes_find!("^#[^\n]*"));
+	
+	// Stashed changes:
+	/*
+    //named!(digit, is_a!(b"0123456789"));
+    named!(digit, re_bytes_find!("^[0-9]"));
+    use nom::digit as number;
+    //named!(octal_digit, re_bytes_find!("^[0-7]"));
+    named!(octal_number, re_bytes_find!("^0o[0-7]+"));
+    //named!(hex_digit, re_bytes_find!("^[0-9a-fA-F]"));
+    named!(hex_number, re_bytes_find!("^0x[:xdigit:]+"));
+    named!(binary_number, re_bytes_find!("^0b[01]+"));
+    named!(letter_pattern, re_bytes_find!("^[:alpha:]"));
+    named!(word_pattern, re_bytes_find!("^[:alpha:][:alnum:]*"));
+    //named!(sci_notation, re_bytes_find!("^[eE][+-]?[:digit:]+"));
+    named!(float_pattern, recognize!(alt!(
+        preceded!(tag!("."), number)
+        | re_bytes_find!("^[:digit:]+(\.[:digit:]+)?([eE][+-]?[:digit:]+)?")
+    )));
+    named!(number_pattern, alt!(
+        hex_number | octal_number | float_pattern | binary_number
+    ));
+    */
     
     /* Helper function: We treat a list as a stack by appending elements to the beginning,
        but this means we have to do a reverse operation to seal the stack at the end. */
@@ -144,6 +160,65 @@ pub fn tokenize(enclosing_kind: TokenGroupKind, name: CodeSource, mut buf: Strin
         char!('"')
     ));
     
+    // Just in case:
+    /* XXX
+    let quoted_string = || {
+        /* This parser works by statefully adding chars to a string buffer */
+        let mut accum = String::new();
+        
+        /* Helper function adds a sedlex match to the buffer */
+        let add_buf = || accum.push_str(Sedlexing.Utf8.lexeme(buf));
+        
+        /* Operate */
+        let proceed = || {
+            /* Call after seeing a backslash. Matches one character, returns string escape corresponds to. */
+            let escaped_char = |c| match c {
+                '\\' => Ok("\\"),
+                '"'  => Ok("\""),
+                'n'  => Ok("\n"),
+                _    => Err(parse_fail("Unrecognized escape sequence")) /* TODO: devour newlines */
+            };
+            
+            /* Chew through until quoted string ends */
+            let chars = buf.chars();
+            loop {
+                match chars.next() {
+                    /* Treat a newline like any other char, but since sedlex doesn't track lines, we have to record it */
+                    Some('\n') => {
+                        state_newline();
+                        add_buf();
+                    }
+                    
+                    /* Backslash found, trigger escape handler */
+                    Some('\\') => {
+                        // FIXME: handle unwrap() below.
+                        let result = escaped_char(chars.next().unwrap());
+                        
+                        match result {
+                            Ok(s) => accum.push_str(s),
+                            Err(e) => return Err(e),
+                        }
+                    }
+                    
+                    /* Unescaped quote found, we are done. Return the data from the buffer. */
+                    Some('"') => break,
+                    
+                    /* User probably did not intend for string to run to EOF. */
+                    None =>
+                        Err(incomplete_fail("Reached end of file inside string. Missing quote?")),
+                    
+                    /* Any normal character add to the buffer and proceed. */
+                    Some(_) => add_buf(),
+                }
+            }
+            
+            Ok(accum)
+        };
+        
+        proceed()
+    };
+	XXX */
+
     /* Sub-parser: backslash. Eat up to, and possibly including, newline */
     let escape = |seen_text| {
         let backtrack = || Sedlexing.backtrack(buf);
@@ -163,7 +238,7 @@ pub fn tokenize(enclosing_kind: TokenGroupKind, name: CodeSource, mut buf: Strin
             /* TODO: Ignore rather than error */
             any => Err(parse_fail("Did not recognize text after backslash.")),
             _ => unreachable!()
-        }
+        }}
     };
 
     /* Main loop. */
@@ -177,7 +252,7 @@ pub fn tokenize(enclosing_kind: TokenGroupKind, name: CodeSource, mut buf: Strin
         let make_token_here = |contents| Token::new(current_position(), contents);
 
         /* Right now all group closers are treated as equivalent. TODO: Don't do it like this. */
-        let close_pattern = closure!(re_bytes_find!("^[})\]$]"));
+        let close_pattern = closure!(re_bytes_find!(r"^[})\]$]"));
         
         /* Recurse with the same groupSeed we started with. */
         let proceed_with_initializer = |init, ls, l| {
@@ -202,7 +277,7 @@ pub fn tokenize(enclosing_kind: TokenGroupKind, name: CodeSource, mut buf: Strin
         let lines_plus_line = || {
             lines.push(line);
             complete_line(lines)
-        }
+        };
 
         /* Recurse with the group_seed and lines we started with, & the argument pushed onto the current line */
         /* Notice state_new_line and add_to_line_proceed are using different notions of a "line". */
@@ -215,9 +290,9 @@ pub fn tokenize(enclosing_kind: TokenGroupKind, name: CodeSource, mut buf: Strin
         let close_group = || group_seed(group_initializer, lines_plus_line());
 
         /* Helper: Given a String -> TokenContents mapping, make the token, add it to the line and recurse */
-        let add_single = <F: Fn(String) -> TokenContents>|constructor| {
+        let add_single = |constructor| {
             add_to_line_proceed(make_token_here(constructor(matched_lexemes())))
-        }
+        };
         
         /* Helper: Function-ized Symbol constructor */
         let make_symbol = TokenContents::Symbol;
@@ -225,7 +300,7 @@ pub fn tokenize(enclosing_kind: TokenGroupKind, name: CodeSource, mut buf: Strin
         /* Helper: See if lines contains anything substantial */
         let any_nonblank = |mut x| loop { match *x {
             [] => return false,
-            [l, ..more] if l.is_empty() => x = more.to_vec(),
+            [l, ref more..] if l.is_empty() => x = more.to_vec(),
             _ => return true
         }};
         
@@ -316,7 +391,6 @@ pub fn tokenize(enclosing_kind: TokenGroupKind, name: CodeSource, mut buf: Strin
             '"' => add_to_line_proceed(make_token_here(TokenContents::String(Cow::from(quoted_string()?)))),
             */
             
-            
             /* Floating point number */
             | number_pattern => { TokenContents::Number }
             /*
@@ -363,7 +437,7 @@ pub fn tokenize(enclosing_kind: TokenGroupKind, name: CodeSource, mut buf: Strin
             a if a == case => add_single(TokenContents::Symbol),
             _ => Err(parse_fail("Unexpected character")) /* Probably not possible? */
         }
-    }
+    };
 
     /* When first entering the parser, treat the entire program as implicitly being surrounded by parenthesis */
     proceed((GroupCloseToken::Eof, current_position()), token::make_group(current_position(), TokenClosureKind::NonClosure, enclosing_kind), vec![], vec![], vec![])
@@ -371,26 +445,23 @@ pub fn tokenize(enclosing_kind: TokenGroupKind, name: CodeSource, mut buf: Strin
 
 /* Tokenize entry point typed to channel */
 pub fn tokenize_channel<C: io::Read>(source: CodeSource, channel: C) -> Result<Token, Error> {
-    let lexbuf = Sedlexing.Utf8.from_channel(channel);
+    let lexbuf = String::new();
+    channel.read_to_string(lexbuf)?;
+    //Sedlexing.Utf8.from_channel(channel);
     tokenize(TokenGroupKind::Plain, source, lexbuf)
 }
 
 /* Tokenize entry point typed to string */
 pub fn tokenize_string(source: CodeSource, string: String) -> Result<Token, Error> {
-    let lexbuf = Sedlexing.Utf8.from_string(string);
+    //let lexbuf = Sedlexing.Utf8.from_string(string);
     tokenize(TokenGroupKind::Plain, source, lexbuf)
-}
-
-fn unwrap(token: Token) -> Result<CodeSequence, String> {
-    match token.contents {
-        TokenContents::Group(g) => Ok(g.items),
-        _ => Err(format!("Internal error: Object in wrong place {}", token.at))
-    }
 }
 
 pub fn snippet(source: CodeSource, st: String) -> Result<CodeSequence, String> {
     match tokenize_string(source, st) {
-        Ok(v) => unwrap(v),       
-        Err(e) => Err(format!("Internal error: Interpreter-internal code is invalid: {}", e)),
+        Ok(Token {contents: TokenContents::Group(g), ..}) => Ok(g.items),
+        
+        Ok(_)  => panic!("Internal error: Object in wrong place {}", token.at),
+        Err(e) => panic!("Internal error: Interpreter-internal code is invalid: {}", e),
     }
 }

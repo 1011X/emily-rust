@@ -240,7 +240,7 @@ fn arrange_token(at: &Token, mut past: SingleLine, present: Token, future: Singl
             v.extend(future);
             v
             
-            past.reverse();
+            //past.reverse();
             
         })
     ]
@@ -318,9 +318,6 @@ fn apply_right(past: SingleLine, at: &Token, future: SingleLine) -> SingleLine {
         .chain(&[new_future(at, future)])
         .collect()
     )]
-    
-    vec![new_past(at,
-    past.iter().chain(
 }
 
 /* "Apply pair"; works like unlambda backtick */
@@ -654,9 +651,9 @@ lazy_static! {
         (MacroPriority::R(50.), "+", make_splitter("plus")),
 
         /* Comparators */
-        (MacroPriority::R(60.), "<", make_splitter("lt")),
+        (MacroPriority::R(60.), "<",  make_splitter("lt")),
         (MacroPriority::R(60.), "<=", make_splitter("lte")),
-        (MacroPriority::R(60.), ">", make_splitter("gt")),
+        (MacroPriority::R(60.), ">",  make_splitter("gt")),
         (MacroPriority::R(60.), ">=", make_splitter("gte")),
 
         (MacroPriority::R(65.), "==", make_splitter("eq")),

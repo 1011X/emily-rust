@@ -119,7 +119,7 @@ fn snippet_apply(closure: &Value, val: Value) -> ClosureValue {
 			need_args: need_args - 1,
 			..cv
 		},
-		_ => Err("Internal error"),
+		_ => panic!("Internal error")
 	}
 }
 

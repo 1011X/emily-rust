@@ -186,10 +186,10 @@ pub static mut ID_GENERATOR: usize = 0;
 
 macro_rules! keywords {
 	($($name:ident, $name_str:ident = $s:expr;)*) => {$(
-		pub static $name_str : &'static str = $s;
+		pub static $name_str: &'static str = $s;
 		
 		lazy_static! {
-			pub static ref $name : Value = Value::Atom(Cow::Borrowed($name_str));
+			pub static ref $name: Value = Value::Atom(Cow::Borrowed($name_str));
 		}
 	)*};
 }
@@ -220,11 +220,11 @@ pub fn table_set_option(table: &mut TableValue, key: Value, value: Option<Value>
 	}
 }
 
-pub fn table_from(value: Value) -> Result<TableValue, ocaml::Failure> {
+pub fn table_from(value: Value) -> TableValue {
 	match value {
 		Value::Table(v)
-		| Value::Object(v) => Ok(v),
+		| Value::Object(v) => v,
 		
-		_ => Err(ocaml::Failure("Internal error-- interpreter accidentally treated a non-object as an object in a place this should have been impossible.".to_owned()))
+		_ => panic!("Internal error: interpreter accidentally treated a non-object as an object in a place this should have been impossible.")
 	}
 }

@@ -26,8 +26,8 @@ F: FnOnce(Vec<arg::Key>) -> Vec<arg::Key> {
 	vec.iter().cloned().map(|(a, b, c)| (f(a), b, c)).collect()
 }
 
-fn arg_plus_limitations(who: &'static str) -> Result<(), ocaml::Failure> {
-	ocaml::failwith(format!("Internal error: Called {} with an arg spec it was not designed to handle.", who))
+fn arg_plus_limitations(who: &'static str) -> ! {
+	panic!("Internal error: Called {} with an arg spec it was not designed to handle.", who);
 }
 
 /* Notice one additional argument vs Arg.parse, called after successful completion with unprocessed part of arg list (possibly empty) */

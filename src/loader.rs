@@ -116,11 +116,16 @@ fn box_sub_starter(starter: ExecuteStarter, kind: BoxSpec) -> ExecuteStarter {
 /* Given a starter, make a new starter with a subscope and the requested project/directory. */
 fn starter_for_execute(starter: ExecuteStarter, project: Option<Value>, directory: Option<Value>) -> ExecuteStarter {
     let (table, sub_starter) = sub_starter_pair(None, starter);
-    value::table_set_option(table, value::PROJECT_KEY, project);
+    
+    if let Some(v) = project {
+        table.insert(value::PROJECT_KEY, project);
+    }
+    
     table.insert(
         value::DIRECTORY_KEY,
         directory.unwrap_or(Value::Table(value_util::table_blank(TableBlankKind::NoSet)))
     );
+    
     sub_starter
 }
 
@@ -150,9 +155,11 @@ fn load_file(starter: ExecuteStarter, project_source: LoaderSource, directory: L
 fn load_package_dir(starter: ExecuteStarter, project_source: LoaderSource, path: PathBuf) -> Value {
     let directory_table = value_util::table_blank(TableBlankKind::NoSet);
     let directory_object = Value::Object(directory_table);
-    let proceed = load_package(starter, project_source.directory_filter(directory_object), LoaderSource::Source (directory_object));
+    let proceed = load_package(starter, project_source.directory_filter(directory_object), LoaderSource::Source(directory_object));
     
-    for name in path.read_dir() {
+    // TODO: handle unwrap below
+    for name in path.read_dir().unwrap() {
+        let name = name.unwrap();
         let mut pathname = path.clone();
         pathname.push(name);
         value_util::table_set_lazy(directory_table, name_atom(name), |_| proceed(pathname));
@@ -172,7 +179,7 @@ fn load_package(starter: ExecuteStarter, project_source: LoaderSource, directory
             load_package_dir(starter, project_source, path)
         }
         else {
-            let package_scope = Value::Table (value_util::table_blank(TableBlankKind::NoSet));
+            let package_scope = Value::Table(value_util::table_blank(TableBlankKind::NoSet));
             load_file(box_sub_starter(starter, BoxSpec::Populating(BoxTarget::Package, package_scope)), project_source, directory, path);
             package_scope
         };

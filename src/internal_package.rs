@@ -21,7 +21,7 @@ use token::{
 
 fn table_pair() -> (TableValue, Value) {
     let table = value_util::table_blank(TableBlankKind::NoSet);
-    let value = Value::Table (table);
+    let value = Value::Table(table);
     (table, value)
 }
 
@@ -48,14 +48,18 @@ fn fake_register_from(reg: RegisterState) -> ExecuteFrame {
     }
 }
 
+fn set_atom_value<I: Into<Option<TableValue>>>(table: I, name: &str, v: Value) {
+	table.into().unwrap_or(INTERNAL_TABLE).insert(Value::Atom(Cow::from(name)), v);
+}
+
 static START: Once = ONCE_INIT;
 
 pub fn init() {
 // may seem like we can remove START, but it ensures that the initialization
 // only ever occurs once for this module when calling init().
 START.call_once(|| {
-    let set_atom_value = |table, name, v|
-        table.unwrap_or(INTERNAL_TABLE).insert(Value::Atom(Cow::from(name)), v);
+    //let set_atom_value = |table, name, v|
+    //    table.unwrap_or(INTERNAL_TABLE).insert(Value::Atom(Cow::from(name)), v);
     
     let set_atom_fn = |table, n, func|
         set_atom_value(table, n, Value::BuiltinFunction(func));
@@ -90,7 +94,7 @@ START.call_once(|| {
     set_atom_value(None, "tern", value_util::RAW_TERN);
     set_atom_value(None, "true", Value::True);
 
-    set_atom_fn(None, "not", box |v| match v { Value::Null => Value::True, _ => Value::Null });
+    set_atom_fn(None, "not", box |v| match v {Value::Null => Value::True, _ => Value::Null});
     set_atom_binary(None, "primitiveEq", box |a, b| value_util::bool_cast(a == b));
 
     set_atom_value(None, "thisTransplant", value_util::RETHIS_TRANSPLANT);
@@ -134,47 +138,47 @@ START.call_once(|| {
 
     /* "Submodule" internal.out */
     let out_table = insert_table(None, "out");
-    //set_atom_fn(Some(out_table), "print", reusable(|v| print_string(pretty::dump_value_for_user(v))));
-    //set_atom_fn(Some(out_table), "flush", reusable(|_| /*// flush_all */ () ));
+    //set_atom_fn(out_table, "print", reusable(|v| print_string(pretty::dump_value_for_user(v))));
+    //set_atom_fn(out_table, "flush", reusable(|_| /* flush_all */ () ));
 
     /* "Submodule" internal.double */
     let double_table = insert_table(None, "double");
 
     let set_atom_math = |table, name, f|
-        set_atom_value(Some(table.unwrap_or(double_table)), name, value_util::snippet_closure(2, |x| match *x {
+        set_atom_value(table.unwrap_or(double_table), name, value_util::snippet_closure(2, |x| match *x {
             [Value::Float(f1), Value::Float(f2)] => Value::Float(f(f1, f2)),
             [Value::Float(_), _] => ocaml::failwith("Don't know how to combine that with a number"),
             _ => unreachable!()
         }));
 
     let set_atom_test = |table, name, f|
-        set_atom_value(Some(table.unwrap_or(double_table)), name, value_util::snippet_closure(2, |x| match *x {
+        set_atom_value(table.unwrap_or(double_table), name, value_util::snippet_closure(2, |x| match *x {
             [Value::Float(f1), Value::Float(f2)] => value_util::bool_cast(f(f1, f2)),
             [Value::Float(_), _] => ocaml::failwith("Don't know how to compare that to a number"),
             _ => unreachable!()
         }));
 
     let set_atom_math_fn = |table, name, f|
-        set_atom_fn(Some(table.unwrap_or(double_table)), name, |x| match x {
+        set_atom_fn(table.unwrap_or(double_table), name, box |x| match x {
             Value::Float(f1) => Value::Float(f(f1)),
             _ => ocaml::failwith("Can only perform that function on a number")
         });
 
-    set_atom_math(None, "add", |a, b| a + b);
+    set_atom_math(None, "add",      |a, b| a + b);
     set_atom_math(None, "subtract", |a, b| a - b);
     set_atom_math(None, "multiply", |a, b| a * b);
-    set_atom_math(None, "divide", |a, b| a / b);
-    set_atom_math(None, "modulus", |a, b| (a % b + b) % b); /* Sign-of-divisor modulus */
+    set_atom_math(None, "divide",   |a, b| a / b);
+    set_atom_math(None, "modulus",  |a, b| (a % b + b) % b); /* Sign-of-divisor modulus */
 
     /* Do I really need all four comparators? */
-    set_atom_test(None, "lessThan", |a, b| a < b);
-    set_atom_test(None, "lessThanEqual", |a, b| a <= b);
-    set_atom_test(None, "greaterThan", |a, b| a > b);
+    set_atom_test(None, "lessThan",         |a, b| a <  b);
+    set_atom_test(None, "lessThanEqual",    |a, b| a <= b);
+    set_atom_test(None, "greaterThan",      |a, b| a >  b);
     set_atom_test(None, "greaterThanEqual", |a, b| a >= b);
 
     set_atom_math_fn(None, "floor", f64::floor);
 
-    set_atom_fn(Some(double_table), "toString", |x| match x {
+    set_atom_fn(double_table, "toString", box |x| match x {
         Value::Float(f1) => Value::String(f1.to_string()),
         _ => ocaml::failwith("Can only perform that function on a number")
     });
@@ -182,8 +186,8 @@ START.call_once(|| {
     /* "Submodule" internal.string */
     let atom_table = insert_table(None, "atom");
 
-    set_atom_fn(Some(atom_table), "toString", |x| match x {
-        Value::Atom(ref s) => Value::String(s.into_owned()),
+    set_atom_fn(atom_table, "toString", box |x| match x {
+        Value::Atom(ref s) => Value::String(s.borrow().to_owned()),
         _ => ocaml::failwith("Can only perform that function on an atom")
     });
 
@@ -192,7 +196,7 @@ START.call_once(|| {
 
     /* Note: Does NOT coerce into a type, f is of type f -> value */
     let set_atom_string_op = |table, name, f|
-        set_atom_value(Some(table.unwrap_or(string_table)), name, value_util::snippet_closure(1, box |x| match *x {
+        set_atom_value(table.unwrap_or(string_table), name, value_util::snippet_closure(1, box |x| match *x {
             [Value::String(f1)] => f(f1),
             _ => ocaml::failwith("Can only perform that operation on a string")
         }));
@@ -208,26 +212,25 @@ START.call_once(|| {
     let iterator_value = |filter| box |st| {
         let loc = fake_register_location("internal.string.iterUtf8");
         
-        Value::BuiltinHandoff(box |context, stack, (f, at)| match st.chars().nth(0) {
-            Some(u) => {
-                let result = filter(u);
-                let mut v = stack.clone();
-                v.push(fake_register_from(RegisterState::FirstValue(TRUEFN_VALUE, loc, loc.clone())));
-                v.push(fake_register_from(RegisterState::PairValue(f, result, loc, loc.clone())));
-                execute::execute_step(context, v)
-            }
-            _ => execute::return_to(context, stack, (Value::Null, loc))
+        Value::BuiltinHandoff(box |context, stack, (f, at)| if let Some(u) = st.chars().nth(0) {
+            let result = filter(u);
+            let mut v = stack.clone();
+            v.push(fake_register_from(RegisterState::FirstValue(TRUEFN_VALUE, loc, loc.clone())));
+            v.push(fake_register_from(RegisterState::PairValue(f, result, loc, loc.clone())));
+            execute::execute_step(context, v)
+        } else {
+            execute::return_to(context, stack, (Value::Null, loc))
         })
     };
     set_atom_string_op(None, "iterUtf8", iterator_value(uchar_to_string));
     set_atom_string_op(None, "iterUtf8Codepoint", iterator_value(uchar_to_codepoint));
     
-    set_atom_value(Some(string_table), "codepointToString", value_util::snippet_closure(1, |x| match *x {
+    set_atom_value(string_table, "codepointToString", value_util::snippet_closure(1, |x| match *x {
         [Value::Float(u)] => uchar_to_string(u as u32),
         _ => ocaml::failwith("Can only perform that operation on a number")
     }));
 
-    set_atom_value(Some(string_table), "concat", value_util::snippet_closure(2, box |x| match *x {
+    set_atom_value(string_table, "concat", value_util::snippet_closure(2, box |x| match *x {
         [Value::String(f1), Value::String(f2)] => Value::String(format!("{}{}", f1, f2)),
         [Value::String(_), _] => ocaml::failwith("Don't know how to combine that with a string"),
         _ => unreachable!()
@@ -236,9 +239,9 @@ START.call_once(|| {
     /* "Submodule" internal.type */
     let type_table = insert_table(None, "type");
 
-    set_atom_fn(Some(type_table), "isAtom", |v| match v { Value::Atom(_) => Value::True, _ => Value::Null});
-    set_atom_fn(Some(type_table), "isString", |v| match v { Value::String(_) => Value::True, _ => Value::Null});
-    set_atom_fn(Some(type_table), "isNumber", |v| match v { Value::Float(_) => Value::True, _ => Value::Null});
+    set_atom_fn(type_table, "isAtom",   |v| match v {Value::Atom(_)   => Value::True, _ => Value::Null});
+    set_atom_fn(type_table, "isString", |v| match v {Value::String(_) => Value::True, _ => Value::Null});
+    set_atom_fn(type_table, "isNumber", |v| match v {Value::Float(_)  => Value::True, _ => Value::Null});
 
     /* "Submodule" internal.type */
     /*
@@ -246,7 +249,7 @@ START.call_once(|| {
         use ffi_support::*;
         let ffi_table = insert_table(None, "ffi");
         
-        set_atom_fn(Some(ffi_table), "newForeign", |_| {
+        set_atom_fn(ffi_table, "newForeign", |_| {
             let foreigner = ForeignWrap {
                 name: None,
                 args: vec![],
@@ -264,9 +267,9 @@ START.call_once(|| {
                 }
                 x => ocaml::failwith(&format!("Need key {} for ffi {}; expected string or atom", x, what)),
             }));
-            set_ffi_param("name", |s| foreigner.name = Some(s));
+            set_ffi_param("name",   |s| foreigner.name = Some(s));
             set_ffi_param("return", |s| foreigner.returning = s);
-            set_ffi_param("args", |s| foreigner.args.push(s));
+            set_ffi_param("args",   |s| foreigner.args.push(s));
             
             table.insert(Value::Atom(Cow::from("make")), Value::BuiltinFunction(box |_|
                 match foreigner.name {

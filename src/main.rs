@@ -9,6 +9,7 @@
 
 #[macro_use] extern crate lazy_static;
 #[macro_use] extern crate nom;
+extern crate regex;
 
 mod ocaml;
 
@@ -44,7 +45,7 @@ fn main() {
     let process_one = |target| {
         let buf = match target {
             ExecutionTarget::File(f) =>
-            	// TODO: handle .unwrap() assertion below
+            	// TODO: handle .unwrap()s below
             	tokenize::tokenize_channel(CodeSource::File(f), File::open(f).unwrap()),
         	
             ExecutionTarget::Stdin =>
@@ -83,8 +84,7 @@ fn main() {
 	    /* FIXME: This is maybe awkward? It is here so print_package can work without a target. */
 	    /* It works by assuming an implicit -e '', which is only safe if we assume */
 	    /* option.ml would have failed already if that weren't ok. */
-		let result = process_one(options::RUN.target
-			.as_ref()
+		let result = process_one(options::RUN.target.as_ref()
 			.unwrap_or(ExecutionTarget::Literal(String::new()))
 		);
 		
@@ -103,7 +103,7 @@ fn main() {
 		
         /* In the standalone version, it appears this happens automatically on exit. */
         /* In the C-embed version, it does *not*, so call it here. */
-        // TODO: determine how to this would translate
+        // TODO: determine how this would translate
         //flush_all();
 	}
 }
