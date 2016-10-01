@@ -502,18 +502,18 @@ pub fn stack_string(stack: &ExecuteStack) -> String {
 	let mut result = "Stack:".to_owned();
 	
 	for frame in stack.iter().rev() {
-		result.push_str("\n\t");
+		result += "\n\t";
 		
 		match *frame {
 			ExecuteFrame {register: RegisterState::LineStart(..), ref code, ..} =>
 				match **code {
-					[] => result.push_str("<empty file>"),
-					[[], ..] => result.push_str("<lost place>"),
-					[[Token {at, ..}, ..], ..] => result.push_str(&at.to_string()),
+					[] => result += "<empty file>",
+					[[], ..] => result += "<lost place>",
+					[[Token {at, ..}, ..], ..] => result += &at.to_string(),
 				},
 			ExecuteFrame {register: RegisterState::FirstValue(_, _, ref at), ..}
 			| ExecuteFrame {register: RegisterState::PairValue(_, _, _, ref at), ..} =>
-				result.push_str(&at.to_string()),
+				result += &at.to_string(),
 		}
 	}
 	

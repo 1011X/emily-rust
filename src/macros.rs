@@ -265,7 +265,7 @@ fn make_splitter(atom_string: &'static str) -> MacroFunction {
 fn make_unary(atom_string: &'static str) -> MacroFunction {
     box move |past, at, future| match *future {
         [ref far_future.., a] => arrange(at, past, vec![a, clone_atom(at, atom_string)], far_future.to_vec()),
-        _ => token::fail_token(at, &format!("{} must be followed by something", pretty::dump_code_tree_terse(at))),
+        _ => token::fail_token(at, &format!("{} must be followed by something", pretty::dump_code_tree_terse(at)))
     }
 }
 
@@ -273,7 +273,7 @@ fn make_unary(atom_string: &'static str) -> MacroFunction {
 fn make_prefix_unary(word_string: &'static str) -> MacroFunction {
     box move |past, at, future| match *future {
         [ref far_future.., a] => arrange(at, past, vec![clone_word(at, word_string), a], far_future.to_vec()),
-        _ => token::fail_token(at, format!("{} must be followed by something", pretty::dump_code_tree_terse(at))),
+        _ => token::fail_token(at, &format!("{} must be followed by something", pretty::dump_code_tree_terse(at)))
     }
 }
 

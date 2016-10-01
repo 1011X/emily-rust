@@ -187,7 +187,7 @@ START.call_once(|| {
     let atom_table = insert_table(None, "atom");
 
     set_atom_fn(atom_table, "toString", box |x| match x {
-        Value::Atom(ref s) => Value::String(s.borrow().to_owned()),
+        Value::Atom(ref s) => Value::String(s.to_owned()),
         _ => ocaml::failwith("Can only perform that function on an atom")
     });
 

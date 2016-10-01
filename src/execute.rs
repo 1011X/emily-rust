@@ -409,7 +409,7 @@ fn evaluate_token_from_tokens(context: ExecuteContext, stack: ExecuteStack, fram
                                 group_initializer: vec![],
                                 items: group.items,
                             }));
-                            let word = token::clone(token, TokenContents::Word(Cow::Borrowed(value::CURRENT_KEY_STRING)));
+                            let word = token::clone(token, TokenContents::Word(Cow::from(value::CURRENT_KEY_STRING)));
                             vec![vec![wrapper_group], vec![word]]
                         }
                         _ => group.items,
@@ -475,7 +475,7 @@ fn apply(context: ExecuteContext, stack: ExecuteStack, this: Value, a: Value, b:
         
         (Value::Object(_), Some(&c @ Value::Closure(_))) => r(value_util::raw_rethis_super_from(this, c)),
         (_, Some(&v)) => r(v),
-        (_, None) => match (a, t.get(&value::PARENT_KEY)) {
+        (_, None) => match (a, t.get(value::PARENT_KEY)) {
             (Value::Object(_), Some(&parent @ Value::Closure(_))) =>
                 apply(context, stack, this, value_util::raw_rethis_super_from(this, parent), b),
             (_, Some(&parent)) => apply(context, stack, this, parent, b),

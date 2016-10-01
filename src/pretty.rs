@@ -1,6 +1,7 @@
 /* Pretty-printers for types from various other files */
 
 use std::cmp::Ordering;
+use std::borrow::Cow;
 
 use token::{
     CodeSequence,
@@ -23,14 +24,14 @@ use value::{
 /* --- Code printers --- */
 
 /* "Disassemble" a token tree into a human-readable string (specializable) */
-fn dump_code_tree_general(group_printer: fn(&Token, String, String, CodeSequence) -> String, token: &Token) -> String {
+fn dump_code_tree_general(group_printer: fn(&Token, String, String, CodeSequence) -> String, token: &Token) -> Cow<str> {
     match token.contents {
     /* For a simple (nongrouping) token, return a string for just the item */
         TokenContents::Word(ref x)
-        | TokenContents::Symbol(ref x) => x.to_owned(),
-        TokenContents::String(ref x) => format!("\"{}\"", x),
-        TokenContents::Atom(ref x) => format!(".{}", x),
-        TokenContents::Number(x) => x.to_string(),
+        | TokenContents::Symbol(ref x) => Cow::from(x),
+        TokenContents::String(ref x) => Cow::from(format!("\"{}\"", x)),
+        TokenContents::Atom(ref x) => Cow::from(format!(".{}", x)),
+        TokenContents::Number(x) => Cow::from(x.to_string()),
         
         TokenContents::Group(TokenGroup {kind, closure, items}) => {
             let (l, r) = match kind {
@@ -47,13 +48,13 @@ fn dump_code_tree_general(group_printer: fn(&Token, String, String, CodeSequence
             
             /* GroupPrinter is an argument function which takes the left group symbol, right group
                symbol, and group contents, and decides how to format them all. */
-            group_printer(token, l, r.to_string(), items)
+            Cow::from(group_printer(token, l, r.to_string(), items))
         }
     }
 }
 
 /* "Disassemble" a token tree into a human-readable string (specialized for looking like code) */
-pub fn dump_code_tree_terse(token: &Token) -> String {
+pub fn dump_code_tree_terse(token: &Token) -> Cow<str> {
     fn group_printer(token: &Token, mut l: String, r: String, items: CodeSequence) -> String {
         let eachline = |tokens| tokens.iter()
             .map(|t| dump_code_tree_general(group_printer, t))
@@ -71,7 +72,7 @@ pub fn dump_code_tree_terse(token: &Token) -> String {
 }
 
 /* "Disassemble" a token tree into a human-readable string (specialized to show token positions) */
-pub fn dump_code_tree_dense(token: &Token) -> String {
+pub fn dump_code_tree_dense(token: &Token) -> Cow<str> {
     fn one_token(x: &Token) -> String {
         format!("{} {}", x.at, dump_code_tree_general(group_printer, x))
     }
@@ -107,7 +108,7 @@ fn escape_string(s: &str) -> String {
                 sb.push('\\');
                 sb.push(c);
             }
-            '\n' => sb.push_str("\\n"),
+            '\n' => sb += "\\n",
             _ => sb.push(c),
         }
     }
@@ -117,64 +118,62 @@ fn escape_string(s: &str) -> String {
     sb
 }
 
-fn angle_wrap(s: &str) -> String {
-    format!("<{}>", s)
-}
+fn angle_wrap(s: &str) -> String { format!("<{}>", s) }
 
-fn id_string_for_table(t: &TableValue) -> String {
+fn id_string_for_table(t: &TableValue) -> Cow<'static, str> {
     match t.get(value::ID_KEY) {
-        None => "UNKNOWN".to_owned(),
-        
-        Some(&Value::Float(v)) => (v as i32).to_string(),
-        
-        _ => "INVALID".to_owned() /* Should be impossible */
+        None => Cow::from("UNKNOWN"),
+        Some(&Value::Float(v)) => Cow::from((v as i32).to_string()),
+        _ => Cow::from("INVALID") /* Should be impossible */
     }
 }
 
-fn id_string_for_value(v: &Value) -> String {
+fn id_string_for_value(v: &Value) -> Cow<'static, str> {
     match *v {
-        Value::Table(ref t) | Value::Object(ref t) =>
+        Value::Table(ref t)
+        | Value::Object(ref t) =>
             id_string_for_table(t),
         
-        _ => "UNTABLE".to_owned(),
+        _ => Cow::from("UNTABLE")
     }
 }
 
-pub fn dump_value_tree_general(wrapper: fn(&str, &Value) -> String, v: &Value) -> String {
+pub fn dump_value_tree_general(wrapper: fn(&str, &Value) -> String, v: &Value) -> Cow<'static, str> {
     match *v {
-        Value::Null => "<null>".to_owned(),
-        Value::True => "<true>".to_owned(),
-        Value::Float(v) => v.to_string(),
-        Value::String(ref s) => escape_string(s),
-        Value::Atom(ref s) => format!(".{}", s),
-        Value::BuiltinFunction(_) => "<builtin>".to_owned(),
-        Value::BuiltinMethod(_) => "<object-builtin>".to_owned(),
-        Value::BuiltinUnaryMethod(_) => "<property-builtin>".to_owned(),
+        Value::Null => Cow::from("<null>"),
+        Value::True => Cow::from("<true>"),
+        Value::Float(v) => Cow::from(v.to_string()),
+        Value::String(ref s) => Cow::from(escape_string(s)),
+        Value::Atom(ref s) => Cow::from(format!(".{}", s)),
+        Value::BuiltinFunction(_) => Cow::from("<builtin>"),
+        Value::BuiltinMethod(_) => Cow::from("<object-builtin>"),
+        Value::BuiltinUnaryMethod(_) => Cow::from("<property-builtin>"),
         Value::Closure(ClosureValue {exec: e, need_args: n}) => {
             let tag = match e {
                 ClosureExec::User(_) => "closure",
                 ClosureExec::Builtin(_) => "closure-builtin",
             };
             
-            format!("<{}/{}>", tag, n)
+            Cow::from(format!("<{}/{}>", tag, n))
         }
-        Value::Table(_) => wrapper("scope", v), /* From the user's perspective, a table is a scope */
-        Value::Object(_) => wrapper("object", v),
-        Value::Continuation(_) => "<return>".to_owned(),
+        Value::Table(_) => Cow::from(wrapper("scope", v)), /* From the user's perspective, a table is a scope */
+        Value::Object(_) => Cow::from(wrapper("object", v)),
+        Value::Continuation(_) => Cow::from("<return>"),
     }
 }
 
-pub fn simple_wrapper(label: &str, obj: &Value) -> String {
+pub fn simple_wrapper(label: &str, _: &Value) -> String {
     angle_wrap(label)
 }
 
 pub fn label_wrapper(label: &str, obj: &Value) -> String {
-    angle_wrap(&match *obj {
-        Value::Table(ref t) | Value::Object(ref t) =>
-            format!("{}:{}", label, id_string_for_table(t)),
+    match *obj {
+        Value::Table(ref t)
+        | Value::Object(ref t) =>
+            format!("<{}:{}>", label, id_string_for_table(t)),
         
-        _ => label.to_owned(),
-    })
+        _ => angle_wrap(label),
+    }
 }
 
 /* FIXME: The formatting here is not even a little bit generalized. */
@@ -190,27 +189,29 @@ fn dump_value_unwrapped_table(t: &TableValue) -> String {
 
 fn dump_value_table(v: &Value) -> String {
     v.to_string() + match *v {
-        Value::Table(ref t) | Value::Object(ref t) =>
+        Value::Table(ref t)
+        | Value::Object(ref t) =>
             &dump_value_unwrapped_table(t),
         
-        _ => "",
+        _ => ""
     }
 }
 
 pub fn dump_value_new_table(v: &Value) -> String {
-    if options::RUN.trace_set {
-        dump_value_table(v)
-    } else {
-        v.to_owned()
-    }
+	if unsafe { options::RUN.trace_set } {
+	    dump_value_table(v)
+	} else {
+	    v.to_string()
+	}
 }
 
 /* Normal "print" uses this */
-pub fn dump_value_for_user(v: &Value) -> String {
+pub fn dump_value_for_user(v: &Value) -> Cow<str> {
     match *v {
-        Value::String(ref s) => s.clone(),
+        Value::String(ref s) => Cow::from(s),
         Value::Atom(ref s) => s.clone(),
-        _ => v.to_owned(),
+        
+        _ => Cow::from(v.to_string())
     }
 }
 
@@ -237,11 +238,11 @@ fn sort_items(&(k1, v1): &(&Value, &Value), &(k2, v2): &(&Value, &Value)) -> Ord
 }
 
 /* Display the key atom -- special-cased to avoid using a dot, since defns don't use them */
-fn display_key(k: &Value) -> String {
+fn display_key(k: &Value) -> Cow<str> {
     match *k {
         Value::Atom(ref s) => s.clone(),
-        Value::Float(n) => format!("<{}>", n),
-        _ => "<error>".to_owned()
+        Value::Float(n) => Cow::from(format!("<{}>", n)),
+        _ => Cow::from("<error>")
     }
 }
 
@@ -250,8 +251,9 @@ fn truncate(mut s: String, limit_at: usize, reduce_to: usize, suffix: &str) -> S
     if s.len() > limit_at {
         s.truncate(reduce_to);
         s + suffix
+    } else {
+    	s
     }
-    else { s }
 }
 
 /* Provide a compact view of tables/objects for the REPL */
@@ -264,7 +266,7 @@ fn display_table(t: &TableValue) -> String {
     let ordered = items.iter()
         .filter(should_show_item);
     
-    let f = |&(k, v)| display_key(k) + " = " + &repl_display(v, false);
+    let f = |&(k, v)| display_key(k).into_owned() + " = " + repl_display(v, false).borrow();
     
     let out = match *ordered.map(f).collect::<Vec<_>>() {
         [] => "[...]".to_owned(),
@@ -275,16 +277,22 @@ fn display_table(t: &TableValue) -> String {
 }
 
 /* Create a string representation of a value for the REPL */
-pub fn repl_display(value: &Value, recurse: bool) -> String {
+pub fn repl_display(value: &Value, recurse: bool) -> Cow<str> {
     match *value {
-        Value::Null => "null".to_owned(),
-        Value::True => "true".to_owned(),
-        Value::Float(n) => n.to_string(),
-        Value::String(ref s) => escape_string(s),
-        Value::Atom(ref s) => format!(".{}", s),
-        Value::Table(ref t) | Value::Object(ref t) =>
-            if recurse { display_table(t) }
-            else { "<object>".to_owned() },
-        _ => dump_value_for_user(value),
+        Value::Null => Cow::from("null"),
+        Value::True => Cow::from("true"),
+        
+        Value::Float(n) => Cow::from(n.to_string()),
+        Value::String(ref s) => Cow::from(escape_string(s)),
+        Value::Atom(ref s) => Cow::from(format!(".{}", s)),
+        Value::Table(ref t)
+        | Value::Object(ref t) =>
+		    if recurse {
+		    	Cow::from(display_table(t))
+			} else {
+				Cow::from("<object>")
+			},
+		
+        _ => dump_value_for_user(value)
     }
 }
