@@ -149,7 +149,7 @@ pub fn tokenize(enclosing_kind: TokenGroupKind, name: CodeSource, mut buf: Strin
     let quoted_string = closure!(delimited!(
         char!('"'),
         map_res!(
-            escaped_transform!(is_not!("\\\""), '\\', alt!(
+            escaped_transform!(is_not!("\\"), '\\', alt!(
                 char!('\\')  => { |_| b"\\" }
                 | char!('"') => { |_| b"\"" }
                 | char!('n') => { |_| b"\n" }
@@ -167,7 +167,7 @@ pub fn tokenize(enclosing_kind: TokenGroupKind, name: CodeSource, mut buf: Strin
         let mut accum = String::new();
         
         /* Helper function adds a sedlex match to the buffer */
-        let add_buf = || accum.push_str(Sedlexing.Utf8.lexeme(buf));
+        let add_buf = || accum += Sedlexing.Utf8.lexeme(buf);
         
         /* Operate */
         let proceed = || {
@@ -195,7 +195,7 @@ pub fn tokenize(enclosing_kind: TokenGroupKind, name: CodeSource, mut buf: Strin
                         let result = escaped_char(chars.next().unwrap());
                         
                         match result {
-                            Ok(s) => accum.push_str(s),
+                            Ok(s) => accum += s,
                             Err(e) => return Err(e),
                         }
                     }
@@ -224,17 +224,30 @@ pub fn tokenize(enclosing_kind: TokenGroupKind, name: CodeSource, mut buf: Strin
         let backtrack = || Sedlexing.backtrack(buf);
         loop {match buf {
             /* Have reached newline. We're done. If no command was issued, eat newline. */
-            '\n' => Ok(if seen_text { backtrack() } else { state_newline() }),
+            if buf.starts_with('\n') {
+            	if seen_text {
+            	    return Ok(backtrack());
+        	    } else {
+            	    return Ok(state_newline());
+        	    }
+        	}
             /* Skip over white space until newline is reached */
-            white_space => escape(seen_text),
+            else if buf.starts_with(char::is_whitespace) {
+                buf = buf.trim_left();
+            }
             /* A second backslash? Okay, back out and let the main loop handle it */
-            '\\' => Ok(backtrack()),
+            else if buf.starts_with('\\') {
+                return Ok(backtrack());
+            }
             /* Comments are allowed after a backslash, and ignored as normal. */
-            '#', Star (Compl '\n') => escape(seen_text),
+            '#', Star (Compl '\n') => {},
             /* User probably did not intend to concatenate with blank line. */
-            eof => if seen_text { Ok(backtrack()) } else {
-                Err(incomplete_fail("Found EOF immediately after backslash, expected token or new line."));
-            },
+            eof =>
+            	if seen_text {
+            	    Ok(backtrack())
+            	} else {
+                    Err(incomplete_fail("Found EOF immediately after backslash, expected token or new line."))
+        		},
             /* TODO: Ignore rather than error */
             any => Err(parse_fail("Did not recognize text after backslash.")),
             _ => unreachable!()
@@ -341,14 +354,14 @@ pub fn tokenize(enclosing_kind: TokenGroupKind, name: CodeSource, mut buf: Strin
             ClassRange {begin: '\\', end: '\\'}, // covers \ 
             ClassRange {begin: '0', end: '9'}, // covers digit
             // covers all letters
-            ClassRange {begin: 0x85 as char, end: 0x85 as char},
-            ClassRange {begin: 0xa0 as char, end: 0xa0 as char},
-            ClassRange {begin: 0x1680 as char, end: 0x1680 as char},
-            ClassRange {begin: 0x2000 as char, end: 0x200a as char},
-            ClassRange {begin: 0x2028 as char, end: 0x2029 as char},
-            ClassRange {begin: 0x202f as char, end: 0x202f as char},
-            ClassRange {begin: 0x205f as char, end: 0x205f as char},
-            ClassRange {begin: 0x3000 as char, end: 0x3000 as char},
+            ClassRange {begin: '\u{85}', end: '\u{85}'},
+            ClassRange {begin: '\u{a0}', end: '\u{a0}'},
+            ClassRange {begin: '\u{1680}', end: '\u{1680}'},
+            ClassRange {begin: '\u{2000}', end: '\u{200a}'},
+            ClassRange {begin: '\u{2028}', end: '\u{2029}'},
+            ClassRange {begin: '\u{202f}', end: '\u{202f}'},
+            ClassRange {begin: '\u{205f}', end: '\u{205f}'},
+            ClassRange {begin: '\u{3000}', end: '\u{3000}'},
         ]));
 
         /* Now finally here's the actual grammar... */
