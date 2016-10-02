@@ -77,9 +77,9 @@ pub fn tokenize(enclosing_kind: TokenGroupKind, name: CodeSource, mut buf: Strin
     ));
     
     named!(comment, re_bytes_find!("^#[^\n]*"));
-	
-	// Stashed changes:
-	/*
+    
+    // Stashed changes:
+    /*
     //named!(digit, is_a!(b"0123456789"));
     named!(digit, re_bytes_find!("^[0-9]"));
     use nom::digit as number;
@@ -217,7 +217,7 @@ pub fn tokenize(enclosing_kind: TokenGroupKind, name: CodeSource, mut buf: Strin
         
         proceed()
     };
-	XXX */
+    XXX */
 
     /* Sub-parser: backslash. Eat up to, and possibly including, newline */
     let escape = |seen_text| {
@@ -225,12 +225,12 @@ pub fn tokenize(enclosing_kind: TokenGroupKind, name: CodeSource, mut buf: Strin
         loop {match buf {
             /* Have reached newline. We're done. If no command was issued, eat newline. */
             if buf.starts_with('\n') {
-            	if seen_text {
-            	    return Ok(backtrack());
-        	    } else {
-            	    return Ok(state_newline());
-        	    }
-        	}
+                if seen_text {
+                    return Ok(backtrack());
+                } else {
+                    return Ok(state_newline());
+                }
+            }
             /* Skip over white space until newline is reached */
             else if buf.starts_with(char::is_whitespace) {
                 buf = buf.trim_left();
@@ -243,11 +243,11 @@ pub fn tokenize(enclosing_kind: TokenGroupKind, name: CodeSource, mut buf: Strin
             '#', Star (Compl '\n') => {},
             /* User probably did not intend to concatenate with blank line. */
             eof =>
-            	if seen_text {
-            	    Ok(backtrack())
-            	} else {
+                if seen_text {
+                    Ok(backtrack())
+                } else {
                     Err(incomplete_fail("Found EOF immediately after backslash, expected token or new line."))
-        		},
+                },
             /* TODO: Ignore rather than error */
             any => Err(parse_fail("Did not recognize text after backslash.")),
             _ => unreachable!()
