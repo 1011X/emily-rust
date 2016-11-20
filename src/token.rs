@@ -20,12 +20,12 @@ pub enum CodeSource {
 impl fmt::Display for CodeSource {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match *self {
-			CodeSource::Stdin => f.write_str("<input>"),
+			CodeSource::Stdin   => f.write_str("<input>"),
 			CodeSource::Cmdline => f.write_str("<commandline>"),
 			CodeSource::Unknown => f.write_str("<unknown>"),
 			
-			CodeSource::Internal(s) => f.write_fmt(format_args!("<internal:{}>", s)),
-			CodeSource::File(ref s) => f.write_fmt(format_args!("'{}'", s.display())),
+			CodeSource::Internal(s) => write!(f, "<internal:{}>", s),
+			CodeSource::File(ref s) => write!(f, "'{}'", s.display()),
 		}
 	}
 }
