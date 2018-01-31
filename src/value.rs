@@ -4,14 +4,15 @@ use std::fmt;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::borrow::Cow;
+use std::sync::atomic;
 
-use ocaml;
+//use ocaml;
 use token;
 use pretty;
-use options;
+//use options;
 
 pub type TableValue = HashMap<Value, Value>;
-
+/*
 /* Closure types: */
 #[derive(Clone)]
 pub struct ClosureExecUser {
@@ -43,8 +44,8 @@ pub struct ClosureValue {
     bound: Vec<Value>,     /* Already-curried values -- BACKWARD, first application last */
     this: ClosureThis,     /* Tracks the "current" and "this" bindings */
 }
-
-#[derive(Clone, Eq)]
+*/
+#[derive(Clone)]
 pub enum Value {
     /* "Primitive" values */
     Null,
@@ -52,64 +53,83 @@ pub enum Value {
     Float(f64),
     String(String),
     Atom(Cow<'static, str>),
-
-    /* Hack types for builtins */ /* FIXME: Can some of these be deprecated? */
-    BuiltinFunction           (Box<Fn(Value) -> Value>), /* function argument = result */
-    BuiltinUnaryMethod        (Box<Fn(Value) -> Value>), /* function self = result */
+    
+    /* Hack types for builtins */
+    /* FIXME: Can some of these be deprecated? */
+    BuiltinFunction(fn(Value) -> Value), /* function argument = result */
+	/*
+    BuiltinUnaryMethod(Box<Fn(Value) -> Value>), /* function self = result */
     BuiltinMethod(Box<Fn(Value) -> Fn(Value) -> Value>), /* function self argument = result */
-    BuiltinHandoff (Box<Fn(ExecuteContext) -> Fn(ExecuteStack) -> Fn(Value, token::CodePosition) -> Value>), /* Take control of interpreter */
+    BuiltinHandoff(Box<Fn(ExecuteContext) -> Fn(ExecuteStack) -> Fn(Value, token::CodePosition) -> Value>), /* Take control of interpreter */
 
     /* Complex user-created values */
     
     /* Is this getting kind of complicated? Should curry be wrapped closures? Should callcc be separate? */
     Closure(ClosureValue),
     UserMethod(Box<Value>),
+    */
     Table(TableValue),
     Object(TableValue), /* Same as Value::Table but treats 'this' different */
-    Continuation(ExecuteStack, token::CodePosition), /* CodePosition only needed for traceback */
+    //Continuation(ExecuteStack, token::CodePosition), /* CodePosition only needed for traceback */
 }
 
 // Used for implementing OCaml's equality rules
 // Note: PartialEq probably shouldn't be implemented like this. This is just temporary. Maybe.
 impl PartialEq for Value {
     fn eq(&self, other: &Value) -> bool {
+    	use self::Value::*;
         match (self, other) {
-            (&Value::Null, &Value::Null)
-            | (&Value::True, &Value::True)
+            (&Null, &Null)
+            | (&True, &True)
                 => true,
             
-            (&Value::Float(f1), &Value::Float(f2)) if f1.is_nan() && f2.is_nan()
-                => true,
+            (&Float(f1), &Float(f2))
+                => f1 == f2 || f1.is_nan() && f2.is_nan(),
             
-            _ => self as *const Value == other as *const Value,
+            (&String(ref s1), &String(ref s2))
+            	=> s1 == s2,
+        	
+        	(&Atom(ref s1), &Atom(ref s2))
+        		=> s1 == s2,
+    		
+    		(&Table(ref t1), &Table(ref t2))
+    		| (&Object(ref t1), &Object(ref t2))
+    			=> t1 == t2,
+            
+            (&BuiltinFunction(fn1), &BuiltinFunction(fn2))
+            	=> fn1 == fn2,
+        	
+        	_ => false
+            //_ => self as *const Value == other as *const Value,
         }
     }
 }
 
+impl Eq for Value {}
+
 impl Hash for Value {
     fn hash<H: Hasher>(&self, hasher: &mut H) {
-        // TODO: implement
-        match self {
-            Value::Null => hasher.write_u8(0),
-            Value::True => hasher.write_u8(1),
-            Value::Float(f) => {
-                hasher.write_u8(2);
-                hasher.write_u64(f as u64);
-            }
-            Value::String(ref s) => {
-                hasher.write_u8(3);
-                
-            }
+        use self::Value::*;
+        ::std::mem::discriminant(self).hash(hasher);
+        match *self {
+            Null | True   => {}
+            Float(f)      => f.to_bits().hash(hasher),
+            String(ref s) => s.hash(hasher),
+            Atom(ref c)   => c.hash(hasher),
+            
+            Table(ref t) | Object(ref t)
+            	=> (t as *const _).hash(hasher),
+        	BuiltinFunction(f)
+        		=> f.hash(hasher),
         }
     }
 }
 
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        
-        let wrapper =
-            if unsafe {options::RUN.track_objects} { pretty::label_wrapper }
-            else { pretty::simple_wrapper };
+        let wrapper = pretty::simple_wrapper;
+            //if unsafe {options::RUN.track_objects} { pretty::label_wrapper }
+            //else { pretty::simple_wrapper };
         
         f.write_str(&pretty::dump_value_tree_general(wrapper, self))
     }
@@ -131,7 +151,7 @@ impl fmt::Display for RegisterState {
             RegisterState::LineStart(ref v, _) =>
                 write!(f, "LineStart:{}", v),
         
-            RegisterState::FirstValue(ref v, _) =>
+            RegisterState::FirstValue(ref v, _, _) =>
                 write!(f, "FirstValue:{}", v),
         
             RegisterState::PairValue(ref v1, ref v2, _, _) =>
@@ -139,7 +159,7 @@ impl fmt::Display for RegisterState {
         }
     }
 }
-
+/*
 /* Each frame on the stack has the two value "registers" and a codeSequence reference which
    is effectively an instruction pointer. */
 pub struct ExecuteFrame {
@@ -150,7 +170,7 @@ pub struct ExecuteFrame {
 
 /* The current state of an execution thread consists of just the stack of frames. */
 pub type ExecuteStack = Vec<ExecuteFrame>;
-
+*/
 pub struct ExecuteContext {
     null_proto   : Value,
     true_proto   : Value,
@@ -167,30 +187,30 @@ pub enum TableBlankKind {
     NoLet,     /* Has .set. Used for "flat" expression groups. */
     WithLet,   /* Has .let. Used for scoped groups. */
 }
-
+/*
 /* For making a scope inside an object literal */
 pub enum TableBoxKind {
     BoxNew(token::BoxKind),
     BoxValue(Value),
 }
-
+*/
 pub struct ExecuteStarter {
     root_scope: Value,
     context: ExecuteContext,
 }
 
-pub static mut ID_GENERATOR: usize = 0;
+pub static ID_GENERATOR: atomic::AtomicUsize = atomic::ATOMIC_USIZE_INIT;
 
 /* "Keywords" */
 
 macro_rules! keywords {
-    ($($name:ident, $name_str:ident = $s:expr;)*) => {$(
-        pub static $name_str: &'static str = $s;
+    ($($name:ident, $name_str:ident = $s:expr;)*) => {
+        $(pub static $name_str: &str = $s;)*
         
         lazy_static! {
-            pub static ref $name: Value = Value::Atom(Cow::Borrowed($name_str));
+            $(pub static ref $name: Value = Value::Atom(Cow::Borrowed($name_str));)*
         }
-    )*};
+    };
 }
 
 keywords! {

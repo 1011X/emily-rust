@@ -44,7 +44,7 @@ impl fmt::Display for CodePosition {
 		write!(f, "[{} line {} ch {}]", self.file_name, self.line_number, self.line_offset)
 	}
 }
-
+/*
 /* If the group is boxed, what is returned from it? */
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum BoxKind { NewObject, NewScope }
@@ -76,7 +76,7 @@ pub struct TokenGroup {
 	group_initializer: Vec<Token>, /* Used to create scope */
 	items: CodeSequence,           /* Group is a list of lines, lines are a list of tokens */
 }
-
+*/
 /* Data content of a token */
 #[derive(Clone)]
 pub enum TokenContents<'a> {
@@ -85,16 +85,16 @@ pub enum TokenContents<'a> {
 	String(String), /* "Quoted" */
 	Atom(Cow<'a, str>),   /* Ideally appears post-macro only */
 	Number(f64),
-	Group(TokenGroup),
+	//Group(TokenGroup),
 }
 
 /* A token. Effectively, an AST node. */
 #[derive(Clone)]
 pub struct Token<'a> {
 	at: CodePosition,
-	contents: TokenContents<'a>,
+	pub contents: TokenContents<'a>,
 }
-
+/*
 /* Quick constructor for token, group type */
 pub fn make_group(position: CodePosition, closure: TokenClosureKind, kind: TokenGroupKind, group_initializer: Vec<Token>, items: CodeSequence) -> Token {
     Token {
@@ -107,23 +107,20 @@ pub fn make_group(position: CodePosition, closure: TokenClosureKind, kind: Token
 		}),
 	}
 }
-
-pub fn clone(token: &Token, contents: &TokenContents) -> Token {
+*/
+pub fn clone<'tc>(token: &Token, contents: &TokenContents<'tc>) -> Token<'tc> {
 	Token::new(token.at.clone(), contents.clone())
 }
-
+/*
 pub fn clone_group(token: &Token, closure: &TokenClosureKind, kind: TokenGroupKind, initializer: &[Token], items: &[Vec<Token>]) -> Token {
 	make_group(token.at.clone(), closure.clone(), kind, initializer.to_vec(), items.to_vec())
 }
-
-impl Token {
+*/
+impl<'a> Token<'a> {
 	/* Quick constructor for Token */
 	// Formerly make_token()
 	pub fn new(position: CodePosition, contents: TokenContents) -> Token {
-		Token {
-			at: position,
-			contents: contents,
-		}
+		Token { at: position, contents }
 	}
 	
 	/* Quick constructor for Token, group type */

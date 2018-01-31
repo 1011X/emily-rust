@@ -88,7 +88,13 @@ fn snippet_scope(bindings: Vec<(String, Value)>) -> Value {
 }
 
 /* Define an ad hoc function using a literal string inside the interpreter. */
-fn snippet_text_closure_abstract(source: CodeSource, this_kind: ClosureThis, context: Vec<(String, Value)>, keys: Vec<String>, text: &'static str) -> Value {
+fn snippet_text_closure_abstract(
+	source: CodeSource,
+	this_kind: ClosureThis,
+	context: Vec<(String, Value)>,
+	keys: Vec<String>,
+	text: &'static str)
+-> Value {
 	Value::Closure(ClosureValue {
 		exec: ClosureExec::User {
 			body: tokenize::snippet(source, text.to_owned()),
@@ -165,6 +171,7 @@ fn raw_rethis_assign_object_definition(obj: &Value, mut v: Value) -> Value {
 /* This handles what occurs when you assign to a table at any other time:
    The "newborn" quality that makes it possible to assign a `this` is lost. */
 fn raw_rethis_assign_object(mut v: Value) -> Value {
+	if let Value::Closure(c @ ClosureValue
 	match v {
 		Value::Closure (c @ ClosureValue {this: ClosureThis::Blank, ..}) =>
 			c.this = ClosureThis::Never,
