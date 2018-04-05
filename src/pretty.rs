@@ -17,7 +17,7 @@ use value::{
     Value,
     //ClosureExec,
     //ClosureValue,
-    RegisterState,
+    //RegisterState,
 };
 
 
@@ -162,8 +162,8 @@ pub fn dump_value_tree_general(
         Value::Float(v) => Cow::from(v.to_string()),
         Value::String(ref s) => Cow::from(escape_string(s)),
         Value::Atom(ref s) => Cow::from(format!(".{}", s)),
-        Value::BuiltinFunction(_) => Cow::from("<builtin>"),
         /*
+        Value::BuiltinFunction(_) => Cow::from("<builtin>"),
         Value::BuiltinMethod(_) => Cow::from("<object-builtin>"),
         Value::BuiltinUnaryMethod(_) => Cow::from("<property-builtin>"),
         Value::Closure(ClosureValue {exec: e, need_args: n}) => {
@@ -308,14 +308,13 @@ pub fn repl_display(value: &Value, recurse: bool) -> Cow<str> {
         Value::Float(n) => Cow::from(n.to_string()),
         Value::String(ref s) => Cow::from(escape_string(s)),
         Value::Atom(ref s) => Cow::from(format!(".{}", s)),
-        Value::Table(ref t)
-        | Value::Object(ref t) =>
+        Value::Table(ref t) | Value::Object(ref t) =>
 		    if recurse {
 		    	Cow::from(display_table(t))
 			} else {
 				Cow::from("<object>")
 			},
 		
-        _ => dump_value_for_user(value)
+        //_ => dump_value_for_user(value)
     }
 }

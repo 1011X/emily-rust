@@ -55,11 +55,11 @@ pub fn snippet_closure(arg_count: usize, exec: Box<Fn(Vec<Value>) -> Value>) -> 
 
 /* For debugging, call this after creating a hashtable set to become a Value */
 fn seal_table(t: &mut TableValue) {
+	use std::sync::atomic::Ordering;
 	if options::RUN.track_objects {
-		unsafe {
-			ID_GENERATOR += 1;
-			t.insert(value::ID_KEY.clone(), Value::Float(ID_GENERATOR as f64));
-		}
+		ID_GENERATOR.fetch_add(1, Ordering::SeqCst);
+		let id = ID_GENERATOR.load(Ordering::SeqCst) as f64;
+		t.insert(value::ID_KEY.clone(), Value::Float(id));
 	}
 }
 
@@ -82,7 +82,7 @@ fn table_true_blank_inheriting(v: &Value) -> TableValue {
 fn snippet_scope(bindings: Vec<(String, Value)>) -> Value {
 	let mut scope_table = table_true_blank();
 	for (k, v) in bindings {
-		scope_table.insert(Value::Atom(k), v);
+		scope_table.insert(Value::Atom(Cow::from(k)), v);
 	}
 	Value::Table(scope_table)
 }
@@ -93,8 +93,8 @@ fn snippet_text_closure_abstract(
 	this_kind: ClosureThis,
 	context: Vec<(String, Value)>,
 	keys: Vec<String>,
-	text: &'static str)
--> Value {
+	text: &'static str
+) -> Value {
 	Value::Closure(ClosureValue {
 		exec: ClosureExec::User {
 			body: tokenize::snippet(source, text.to_owned()),
@@ -118,13 +118,15 @@ fn snippet_text_method(source: CodeSource, context: Vec<(String, Value)>, keys: 
 	snippet_text_closure_abstract(source, ClosureThis::Blank, context, keys, text)
 }
 
-fn snippet_apply(closure: &Value, val: Value) -> ClosureValue {
+fn snippet_apply(closure: &Value, value: Value) -> ClosureValue {
 	match *closure {
-		Value::Closure(cv @ ClosureValue {bound, need_args, ..}) if need_args > 1 => ClosureValue {
-			bound: bound.push(val),
-			need_args: need_args - 1,
-			..cv
-		},
+		Value::Closure(cv @ ClosureValue {bound, need_args, ..})
+		if need_args > 1 =>
+			ClosureValue {
+				bound: bound.into_iter().extend(Some(value)).collect(),
+				need_args: need_args - 1,
+				..cv
+			},
 		_ => panic!("Internal error")
 	}
 }
@@ -407,7 +409,7 @@ pub fn box_blank(box_kind: BoxSpec, box_parent: Value) -> TableValue {
     let mut t = table_blank(TableBlankKind::NoLet);
     let mut private_table = table_blank(TableBlankKind::NoLet);
     let private_value = Value::Table(private_table);
-    let target_table = table_from(target_value);
+    let target_table = TableValue::from(target_value);
     
     private_table.insert(value::LET_KEY.to_owned(), make_let( /* Another fallacious value usage */
     	// TODO: currying

@@ -4,7 +4,6 @@ use std::fmt;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::borrow::Cow;
-use std::sync::atomic;
 
 //use ocaml;
 use token;
@@ -24,7 +23,8 @@ pub struct ClosureExecUser {
     has_return: bool,  /* Should the closure execution get its own "return" continuation? */
 }
 
-#[derive(Clone)]
+// Can't clone because Fn* types can't clone
+//#[derive(Clone)]
 pub enum ClosureExec {
     User(ClosureExecUser),
     Builtin(Box<Fn(Vec<Value>) -> Value>)
@@ -32,12 +32,13 @@ pub enum ClosureExec {
 
 #[derive(Clone)]
 pub enum ClosureThis {
-    Blank,                  /* Newly born closure */
-    Never,                  /* Closure is not a method and should not receive a this. */
-    Current(Box<Value>, Box<Value>),  /* Closure is a method, has a provisional current/this. */
-    Frozen(Box<Value>, Box<Value>),   /* Closure is a method, has a final, assigned current/this. */
+    Blank,             /* Newly born closure */
+    Never,             /* Closure is not a method and should not receive a this. */
+    Current(Box<Value>, Box<Value>), /* Closure is a method, has a provisional current/this. */
+    Frozen(Box<Value>, Box<Value>),  /* Closure is a method, has a final, assigned current/this. */
 }
 
+/* Is this getting kind of complicated? Should curry be wrapped closures? Should callcc be separate? */
 pub struct ClosureValue {
     exec: ClosureExec,
     need_args: usize,      /* Count this down as more values are added to bound */
@@ -54,10 +55,9 @@ pub enum Value {
     String(String),
     Atom(Cow<'static, str>),
     
-    /* Hack types for builtins */
-    /* FIXME: Can some of these be deprecated? */
-    BuiltinFunction(fn(Value) -> Value), /* function argument = result */
+    /* Hack types for builtins */ /* FIXME: Can some of these be deprecated? */
 	/*
+    BuiltinFunction(Box<Fn(Value) -> Value>), /* function argument = result */
     BuiltinUnaryMethod(Box<Fn(Value) -> Value>), /* function self = result */
     BuiltinMethod(Box<Fn(Value) -> Fn(Value) -> Value>), /* function self argument = result */
     BuiltinHandoff(Box<Fn(ExecuteContext) -> Fn(ExecuteStack) -> Fn(Value, token::CodePosition) -> Value>), /* Take control of interpreter */
@@ -79,8 +79,7 @@ impl PartialEq for Value {
     fn eq(&self, other: &Value) -> bool {
     	use self::Value::*;
         match (self, other) {
-            (&Null, &Null)
-            | (&True, &True)
+            (&Null, &Null) | (&True, &True)
                 => true,
             
             (&Float(f1), &Float(f2))
@@ -92,13 +91,10 @@ impl PartialEq for Value {
         	(&Atom(ref s1), &Atom(ref s2))
         		=> s1 == s2,
     		
-    		(&Table(ref t1), &Table(ref t2))
-    		| (&Object(ref t1), &Object(ref t2))
+    		(&Table(ref t1), &Table(ref t2)) |
+    		(&Object(ref t1), &Object(ref t2))
     			=> t1 == t2,
             
-            (&BuiltinFunction(fn1), &BuiltinFunction(fn2))
-            	=> fn1 == fn2,
-        	
         	_ => false
             //_ => self as *const Value == other as *const Value,
         }
@@ -109,8 +105,9 @@ impl Eq for Value {}
 
 impl Hash for Value {
     fn hash<H: Hasher>(&self, hasher: &mut H) {
+    	use std::mem;
         use self::Value::*;
-        ::std::mem::discriminant(self).hash(hasher);
+        mem::discriminant(self).hash(hasher);
         match *self {
             Null | True   => {}
             Float(f)      => f.to_bits().hash(hasher),
@@ -118,9 +115,7 @@ impl Hash for Value {
             Atom(ref c)   => c.hash(hasher),
             
             Table(ref t) | Object(ref t)
-            	=> (t as *const _).hash(hasher),
-        	BuiltinFunction(f)
-        		=> f.hash(hasher),
+            	=> (t as *const TableValue).hash(hasher),
         }
     }
 }
@@ -141,7 +136,7 @@ impl fmt::Display for Value {
 pub enum RegisterState {
     LineStart(Value, token::CodePosition),
     FirstValue(Value, token::CodePosition, token::CodePosition),
-    PairValue(Value, Value, token::CodePosition, token::CodePosition)
+    PairValue(Value, Value, token::CodePosition, token::CodePosition),
 }
 
 impl fmt::Display for RegisterState {
@@ -149,12 +144,16 @@ impl fmt::Display for RegisterState {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
             RegisterState::LineStart(ref v, _) =>
+            	//Pretty.dumpValue v
                 write!(f, "LineStart:{}", v),
         
             RegisterState::FirstValue(ref v, _, _) =>
+	            //Pretty.dumpValue v
                 write!(f, "FirstValue:{}", v),
         
             RegisterState::PairValue(ref v1, ref v2, _, _) =>
+            	//Pretty.dumpValue v1
+            	//Pretty.dumpValue v2
                 write!(f, "PairValue:{},{}", v1, v2),
         }
     }
@@ -190,8 +189,8 @@ pub enum TableBlankKind {
 /*
 /* For making a scope inside an object literal */
 pub enum TableBoxKind {
-    BoxNew(token::BoxKind),
-    BoxValue(Value),
+    New(token::BoxKind),
+    Value(Value),
 }
 */
 pub struct ExecuteStarter {
@@ -199,9 +198,8 @@ pub struct ExecuteStarter {
     context: ExecuteContext,
 }
 
-pub static ID_GENERATOR: atomic::AtomicUsize = atomic::ATOMIC_USIZE_INIT;
-
-/* "Keywords" */
+use std::sync::atomic::AtomicUsize;
+pub static ID_GENERATOR: AtomicUsize = AtomicUsize::new(0);
 
 macro_rules! keywords {
     ($($name:ident, $name_str:ident = $s:expr;)*) => {
@@ -213,6 +211,7 @@ macro_rules! keywords {
     };
 }
 
+/* "Keywords" */
 keywords! {
     HAS_KEY,        HAS_KEY_STRING        = "has";
     SET_KEY,        SET_KEY_STRING        = "set";
@@ -232,18 +231,26 @@ keywords! {
     EXPORT_LET_KEY, EXPORT_LET_KEY_STRING = "exportLet";
 }
 
-// Really needed?
+//tableGet table key
+//tableSet table key value
+//tableHas table key
+/*
+//tableSetOption
 pub fn table_set_option(table: &mut TableValue, key: Value, value: Option<Value>) {
     if let Some(v) = value {
         table.insert(key, v);
     }
+    
+    //table.extend(value.map(|v| (key, v)))
 }
+*/
 
-pub fn table_from(value: Value) -> TableValue {
-    match value {
-        Value::Table(v)
-        | Value::Object(v) => v,
-        
-        _ => panic!("Internal error: interpreter accidentally treated a non-object as an object in a place this should have been impossible.")
-    }
+//tableFrom
+impl From<Value> for TableValue {
+	fn from(value: Value) -> Self {
+	    match value {
+		    Value::Table(v) | Value::Object(v) => v,
+		    _ => panic!("Internal error: interpreter accidentally treated a non-object as an object in a place this should have been impossible.")
+	    }
+	}
 }

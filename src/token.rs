@@ -1,7 +1,7 @@
 /* Data representation for an AST. */
 
 use std::fmt;
-use std::string::ToString;
+//use std::string::ToString;
 
 use std::borrow::Cow;
 use std::path::PathBuf;
@@ -17,6 +17,7 @@ pub enum CodeSource {
 }
 
 /* Make CodeSource human-readable */
+// fileNameString
 impl fmt::Display for CodeSource {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match *self {
@@ -39,6 +40,7 @@ pub struct CodePosition {
 }
 
 /* Make CodePosition human-readable */
+// positionString
 impl fmt::Display for CodePosition {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "[{} line {} ch {}]", self.file_name, self.line_number, self.line_offset)
@@ -52,15 +54,15 @@ pub enum BoxKind { NewObject, NewScope }
 /* What are the rules for descending into this group? */
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum TokenGroupKind {
-	Plain,               /* Parenthesis */
-	Scoped,              /* Create a new scope within this group */
+	Plain,              /* Parenthesis */
+	Scoped,             /* Create a new scope within this group */
 	Box(BoxKind),       /* Create a new object */
 }
 
 /* Is this group a closure? What kind? */
 #[derive(Clone)]
 pub enum TokenClosureKind {
-	NonClosure,                             /* Is not a function */
+	NonClosure,                            /* Is not a function */
 	ClosureWithBinding(bool, Vec<String>), /* Function with argument-- arg is return?,args */
 }
 
@@ -69,6 +71,7 @@ pub enum TokenClosureKind {
 /* A Token may be a group with its own CodeSequence. */
 pub type CodeSequence = Vec<Vec<Token>>;
 
+/* Data content of a group-type token */
 #[derive(Clone)]
 pub struct TokenGroup {
 	kind: TokenGroupKind,          /* Group kind */
@@ -100,10 +103,10 @@ pub fn make_group(position: CodePosition, closure: TokenClosureKind, kind: Token
     Token {
     	at: position,
     	contents: TokenContents::Group(TokenGroup {
-			kind: kind,
-			closure: closure,
-			group_initializer: group_initializer,
-			items: items,
+			kind,
+			closure,
+			group_initializer,
+			items,
 		}),
 	}
 }
@@ -118,13 +121,13 @@ pub fn clone_group(token: &Token, closure: &TokenClosureKind, kind: TokenGroupKi
 */
 impl<'a> Token<'a> {
 	/* Quick constructor for Token */
-	// Formerly make_token()
-	pub fn new(position: CodePosition, contents: TokenContents) -> Token {
+	// makeToken
+	pub fn new(position: CodePosition, contents: TokenContents<'a>) -> Self {
 		Token { at: position, contents }
 	}
 	
 	/* Quick constructor for Token, group type */
-	// Formerly make_group()
+	// makeGroup
 	/*
 	pub fn from_group(position: &CodePosition, closure: &TokenClosureKind, kind: &TokenGroupKind, items: &CodeSequence) -> Token {
 		Token {
@@ -151,13 +154,13 @@ impl<'a> Token<'a> {
 pub enum TokenFailureKind {
 	IncompleteError,
 	InvalidError,
-	MacroError
+	MacroError,
 }
 
 pub struct CompilationError(TokenFailureKind, CodePosition, String);
 
+// errorString
 impl fmt::Display for CompilationError {
-	
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		let CompilationError(_, ref at, ref mesg) = *self;
 		write!(f, "Fatal error: {} {}", mesg, at)
