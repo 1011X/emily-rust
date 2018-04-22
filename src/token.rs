@@ -2,8 +2,6 @@
 
 use std::fmt;
 //use std::string::ToString;
-
-use std::borrow::Cow;
 use std::path::PathBuf;
 
 /* Records the original source file of a token */
@@ -46,7 +44,7 @@ impl fmt::Display for CodePosition {
 		write!(f, "[{} line {} ch {}]", self.file_name, self.line_number, self.line_offset)
 	}
 }
-/*
+
 /* If the group is boxed, what is returned from it? */
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum BoxKind { NewObject, NewScope }
@@ -74,30 +72,30 @@ pub type CodeSequence = Vec<Vec<Token>>;
 /* Data content of a group-type token */
 #[derive(Clone)]
 pub struct TokenGroup {
-	kind: TokenGroupKind,          /* Group kind */
-	closure: TokenClosureKind,     /* Closure kind, if any */
-	group_initializer: Vec<Token>, /* Used to create scope */
-	items: CodeSequence,           /* Group is a list of lines, lines are a list of tokens */
+	pub kind: TokenGroupKind,          /* Group kind */
+	pub closure: TokenClosureKind,     /* Closure kind, if any */
+	pub group_initializer: Vec<Token>, /* Used to create scope */
+	pub items: CodeSequence,           /* Group is a list of lines, lines are a list of tokens */
 }
-*/
+
 /* Data content of a token */
 #[derive(Clone)]
-pub enum TokenContents<'a> {
-	Word(Cow<'a, str>),   /* Alphanum */
-	Symbol(Cow<'a, str>), /* Punctuation-- appears pre-macro only. */
+pub enum TokenContents {
+	Word(String),   /* Alphanum */
+	Symbol(String), /* Punctuation-- appears pre-macro only. */
 	String(String), /* "Quoted" */
-	Atom(Cow<'a, str>),   /* Ideally appears post-macro only */
+	Atom(String),   /* Ideally appears post-macro only */
 	Number(f64),
-	//Group(TokenGroup),
+	Group(TokenGroup),
 }
 
 /* A token. Effectively, an AST node. */
 #[derive(Clone)]
-pub struct Token<'a> {
-	at: CodePosition,
-	pub contents: TokenContents<'a>,
+pub struct Token {
+	pub at: CodePosition,
+	pub contents: TokenContents,
 }
-/*
+
 /* Quick constructor for token, group type */
 pub fn make_group(position: CodePosition, closure: TokenClosureKind, kind: TokenGroupKind, group_initializer: Vec<Token>, items: CodeSequence) -> Token {
     Token {
@@ -110,8 +108,8 @@ pub fn make_group(position: CodePosition, closure: TokenClosureKind, kind: Token
 		}),
 	}
 }
-*/
-pub fn clone<'tc>(token: &Token, contents: &TokenContents<'tc>) -> Token<'tc> {
+
+pub fn clone(token: &Token, contents: &TokenContents) -> Token {
 	Token::new(token.at.clone(), contents.clone())
 }
 /*
@@ -119,10 +117,10 @@ pub fn clone_group(token: &Token, closure: &TokenClosureKind, kind: TokenGroupKi
 	make_group(token.at.clone(), closure.clone(), kind, initializer.to_vec(), items.to_vec())
 }
 */
-impl<'a> Token<'a> {
+impl Token {
 	/* Quick constructor for Token */
 	// makeToken
-	pub fn new(position: CodePosition, contents: TokenContents<'a>) -> Self {
+	pub fn new(position: CodePosition, contents: TokenContents) -> Self {
 		Token { at: position, contents }
 	}
 	
@@ -157,12 +155,12 @@ pub enum TokenFailureKind {
 	MacroError,
 }
 
-pub struct CompilationError(TokenFailureKind, CodePosition, String);
+pub struct CompilationError(pub TokenFailureKind, pub CodePosition, pub String);
 
 // errorString
 impl fmt::Display for CompilationError {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		let CompilationError(_, ref at, ref mesg) = *self;
+		let CompilationError(_, ref at, ref mesg) = self;
 		write!(f, "Fatal error: {} {}", mesg, at)
 	}
 }

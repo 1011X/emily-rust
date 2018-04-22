@@ -5,10 +5,16 @@ authors = [
 	"1011X <1011XXXXX@gmail.com>"
 ]
 
+[features]
+repl = ["ctrlc"]
+
 [dependencies]
 regex = "0.2.2"
 getopts = "0.2.14"
 lazy_static = "1.0.0"
+
+# only needed for repl
+ctrlc = { version = "3.1.0", optional = true }
 
 [dependencies.nom]
 version = "3.2.1"

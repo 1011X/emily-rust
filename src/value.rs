@@ -3,33 +3,32 @@
 use std::fmt;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
-use std::borrow::Cow;
 
 //use ocaml;
 use token;
 use pretty;
-//use options;
+use options;
 
 pub type TableValue = HashMap<Value, Value>;
-/*
+
 /* Closure types: */
 #[derive(Clone)]
 pub struct ClosureExecUser {
-    body      : token::CodeSequence,
-    scoped    : bool,  /* Should the closure execution get its own let scope? */
-    env_scope : Box<Value>, /* Captured scope environment of closure manufacture */
+    body: token::CodeSequence,
+    scoped: bool, /* Should the closure execution get its own let scope? */
+    env_scope: Box<Value>, /* Captured scope environment of closure manufacture */
     /* Another option would be to make the "new" scope early & excise 'key': */
-    key       : Vec<String>, /* Not-yet-curried keys, or [] as special for "this is nullary" -- BACKWARD, first-applied key is last */
-    has_return: bool,  /* Should the closure execution get its own "return" continuation? */
+    key: Vec<String>, /* Not-yet-curried keys, or [] as special for "this is nullary" -- BACKWARD, first-applied key is last */
+    has_return: bool, /* Should the closure execution get its own "return" continuation? */
 }
-
+/*
 // Can't clone because Fn* types can't clone
 //#[derive(Clone)]
 pub enum ClosureExec {
     User(ClosureExecUser),
     Builtin(Box<Fn(Vec<Value>) -> Value>)
 }
-
+*/
 #[derive(Clone)]
 pub enum ClosureThis {
     Blank,             /* Newly born closure */
@@ -37,7 +36,7 @@ pub enum ClosureThis {
     Current(Box<Value>, Box<Value>), /* Closure is a method, has a provisional current/this. */
     Frozen(Box<Value>, Box<Value>),  /* Closure is a method, has a final, assigned current/this. */
 }
-
+/*
 /* Is this getting kind of complicated? Should curry be wrapped closures? Should callcc be separate? */
 pub struct ClosureValue {
     exec: ClosureExec,
@@ -53,24 +52,54 @@ pub enum Value {
     True,
     Float(f64),
     String(String),
-    Atom(Cow<'static, str>),
+    Atom(String),
     
     /* Hack types for builtins */ /* FIXME: Can some of these be deprecated? */
-	/*
-    BuiltinFunction(Box<Fn(Value) -> Value>), /* function argument = result */
-    BuiltinUnaryMethod(Box<Fn(Value) -> Value>), /* function self = result */
-    BuiltinMethod(Box<Fn(Value) -> Fn(Value) -> Value>), /* function self argument = result */
-    BuiltinHandoff(Box<Fn(ExecuteContext) -> Fn(ExecuteStack) -> Fn(Value, token::CodePosition) -> Value>), /* Take control of interpreter */
+    BuiltinFunction(fn(Value) -> Value), /* function argument = result */
+    /*
+    BuiltinUnaryMethod(Arc<Fn(Value) -> Value>), /* function self = result */
+    BuiltinMethod(Arc<Fn(Value) -> Fn(Value) -> Value>), /* function self argument = result */
+    BuiltinHandoff(Arc<Fn(ExecuteContext) -> Fn(ExecuteStack) -> Fn(Value, token::CodePosition) -> Value>), /* Take control of interpreter */
 
     /* Complex user-created values */
     
     /* Is this getting kind of complicated? Should curry be wrapped closures? Should callcc be separate? */
     Closure(ClosureValue),
-    UserMethod(Box<Value>),
     */
+    UserMethod(Box<Value>),
     Table(TableValue),
     Object(TableValue), /* Same as Value::Table but treats 'this' different */
     //Continuation(ExecuteStack, token::CodePosition), /* CodePosition only needed for traceback */
+}
+
+impl Value {
+	pub fn from_atom(v: &str) -> Self {
+		Value::Atom(v.to_string())
+	}
+}
+
+impl<'a> From<&'a str> for Value {
+	fn from(v: &str) -> Self {
+		Value::String(v.to_string())
+	}
+}
+
+impl From<String> for Value {
+	fn from(v: String) -> Self {
+		Value::String(v)
+	}
+}
+
+impl From<f64> for Value {
+	fn from(v: f64) -> Self {
+		Value::Float(v)
+	}
+}
+
+impl From<bool> for Value {
+	fn from(v: bool) -> Self {
+		if v { Value::True } else { Value::Null }
+	}
 }
 
 // Used for implementing OCaml's equality rules
@@ -114,6 +143,9 @@ impl Hash for Value {
             String(ref s) => s.hash(hasher),
             Atom(ref c)   => c.hash(hasher),
             
+            UserMethod(ref v) => v.hash(hasher),
+            BuiltinFunction(ref f) => f.hash(hasher),
+            
             Table(ref t) | Object(ref t)
             	=> (t as *const TableValue).hash(hasher),
         }
@@ -122,9 +154,9 @@ impl Hash for Value {
 
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let wrapper = pretty::simple_wrapper;
-            //if unsafe {options::RUN.track_objects} { pretty::label_wrapper }
-            //else { pretty::simple_wrapper };
+        let wrapper =
+            if options::RUN.read().unwrap().track_objects { pretty::label_wrapper }
+            else { pretty::simple_wrapper };
         
         f.write_str(&pretty::dump_value_tree_general(wrapper, self))
     }
@@ -158,7 +190,7 @@ impl fmt::Display for RegisterState {
         }
     }
 }
-/*
+
 /* Each frame on the stack has the two value "registers" and a codeSequence reference which
    is effectively an instruction pointer. */
 pub struct ExecuteFrame {
@@ -169,7 +201,7 @@ pub struct ExecuteFrame {
 
 /* The current state of an execution thread consists of just the stack of frames. */
 pub type ExecuteStack = Vec<ExecuteFrame>;
-*/
+
 pub struct ExecuteContext {
     null_proto   : Value,
     true_proto   : Value,
@@ -186,13 +218,13 @@ pub enum TableBlankKind {
     NoLet,     /* Has .set. Used for "flat" expression groups. */
     WithLet,   /* Has .let. Used for scoped groups. */
 }
-/*
+
 /* For making a scope inside an object literal */
 pub enum TableBoxKind {
     New(token::BoxKind),
     Value(Value),
 }
-*/
+
 pub struct ExecuteStarter {
     root_scope: Value,
     context: ExecuteContext,
@@ -206,7 +238,7 @@ macro_rules! keywords {
         $(pub static $name_str: &str = $s;)*
         
         lazy_static! {
-            $(pub static ref $name: Value = Value::Atom(Cow::Borrowed($name_str));)*
+            $(pub static ref $name: Value = Value::Atom($name_str.to_owned());)*
         }
     };
 }
@@ -231,9 +263,6 @@ keywords! {
     EXPORT_LET_KEY, EXPORT_LET_KEY_STRING = "exportLet";
 }
 
-//tableGet table key
-//tableSet table key value
-//tableHas table key
 /*
 //tableSetOption
 pub fn table_set_option(table: &mut TableValue, key: Value, value: Option<Value>) {
@@ -242,6 +271,13 @@ pub fn table_set_option(table: &mut TableValue, key: Value, value: Option<Value>
     }
     
     //table.extend(value.map(|v| (key, v)))
+}
+*/
+
+/*
+//tableSetString
+pub fn table_set_string(table, key, value) {
+	table.insert(Value::Atom(key), value)
 }
 */
 
