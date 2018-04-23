@@ -5,7 +5,6 @@
    The parts we'd think of a "parser" as usually doing will be handled in a second,
    currently unimplemented, macro-processing step. */
 
-// No idea what's going on here anymore.
 // May as well start from scratch with nom?
 
 use std::io;
@@ -40,21 +39,18 @@ pub enum Error {
 /* Tokenize uses sedlex which is inherently stateful, so tokenize for a single source string is stateful.
    This is the basic state for a file parse-- it basically just records the position of the last seen newline. */
 
+use std::fmt;
+use token;
+
+#[derive(Clone)]
 struct TokenizeState {
-    line_start: isize,
-    line: isize
+	line_start: u32,
+	line: u32,
 }
 
-#[derive(Clone, Copy)]
-enum GroupCloseToken { Eof, Char(String) }
-
-type GroupCloseRecord = (GroupCloseToken, CodePosition);
-
-fn group_close_human_readable(kind: &GroupCloseToken) -> Cow<'static, str> {
-    match *kind {
-        GroupCloseToken::Eof     => Cow::from("end of file"),
-        GroupCloseToken::Char(s) => Cow::from(format!("\"{}\"", s)),
-    }
+enum GroupCloseToken {
+	Eof,
+	Char(String),
 }
 
 /* Entry point to tokenize, takes a filename and a lexbuf */
@@ -380,10 +376,10 @@ pub fn tokenize(enclosing_kind: TokenGroupKind, name: CodeSource, mut buf: Strin
                     match candidate_close {
                         /* No close before EOF: Failure is positioned at the opening symbol */
                         GroupCloseToken::Eof => Err(token::incomplete_at(group_close_at,
-                            &format!("Did not find matching {} anywhere before end of file. Opening symbol:", group_close_human_readable(group_close)))),
+                            &format!("Did not find matching {} anywhere before end of file. Opening symbol:", group_close))),
                         /* Close present, but wrong: Failure is positioned at closing symbol */
                         GroupCloseToken::Char(_) => Err(parse_fail(
-                            format!("Expected closing {} but instead found {}", group_close_human_readable(group_close), group_close_human_readable(candidate_close)))
+                            format!("Expected closing {} but instead found {}", group_close, candidate_close))
                         )
                     }
                 }
@@ -440,34 +436,28 @@ pub fn tokenize(enclosing_kind: TokenGroupKind, name: CodeSource, mut buf: Strin
             '[' => add_to_line_proceed(open_ordinary_group(TokenGroupKind::Box(BoxKind::NewObject))),
             a if a == case => add_single(TokenContents::Symbol),
             _ => Err(parse_fail("Unexpected character")) /* Probably not possible? */
+		}
+	}
+}
+
+// groupCloseHumanReadable
+impl fmt::Display for GroupCloseToken {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    	use self::GroupCloseToken::*;
+        match *self {
+        	Eof         => f.write_str("end of file"),
+        	Char(ref s) => write!(f, "\"{}\"", s),
         }
-    };
-
-    /* When first entering the parser, treat the entire program as implicitly being surrounded by parenthesis */
-    proceed((GroupCloseToken::Eof, current_position()), token::make_group(current_position(), TokenClosureKind::NonClosure, enclosing_kind), vec![], vec![], vec![])
-}
-
-/* Tokenize entry point typed to channel */
-pub fn tokenize_channel<C: io::Read>(source: CodeSource, channel: C) -> Result<Token, Error> {
-    let lexbuf = String::new();
-    channel.read_to_string(lexbuf)?;
-    //Sedlexing.Utf8.from_channel(channel);
-    tokenize(TokenGroupKind::Plain, source, lexbuf)
-}
-
-/* Tokenize entry point typed to string */
-pub fn tokenize_string(source: CodeSource, string: String) -> Result<Token, Error> {
-    //let lexbuf = Sedlexing.Utf8.from_string(string);
-    tokenize(TokenGroupKind::Plain, source, lexbuf)
-}
-
-pub fn snippet(source: CodeSource, st: String) -> Result<CodeSequence, String> {
-    match tokenize_string(source, st) {
-        Ok(Token {contents: TokenContents::Group(g), ..}) => Ok(g.items),
-        
-        Ok(_)  => panic!("Internal error: Object in wrong place {}", token.at),
-        Err(e) => panic!("Internal error: Interpreter-internal code is invalid: {}", e),
     }
+}
+
+type GroupCloseRecord = (GroupCloseToken, token::CodePosition);
+
+/* Entry point to tokenize, takes a filename and a lexbuf */
+/* TODO: Somehow strip blank lines? */
+fn tokenize(enclosingKind, name, buf) -> token::Token {
+	/* -- Helper regexps -- */
+	
 }
 
 
