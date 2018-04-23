@@ -5,6 +5,9 @@
    The parts we'd think of a "parser" as usually doing will be handled in a second,
    currently unimplemented, macro-processing step. */
 
+// No idea what's going on here anymore.
+// May as well start from scratch with nom?
+
 use std::io;
 use std::result;
 use std::borrow::Cow;
@@ -13,6 +16,7 @@ use nom;
 
 use macros;
 use options;
+// is there a reason not to use ::* ?
 use token::{
     self,
     CodeSource,
@@ -57,52 +61,40 @@ fn group_close_human_readable(kind: &GroupCloseToken) -> Cow<'static, str> {
 /* TODO: Somehow strip blank lines? */
 pub fn tokenize(enclosing_kind: TokenGroupKind, name: CodeSource, mut buf: String) -> Result<Token, Error> {
     /* -- Helper regexps -- */
-    named!(octal_number, re_bytes_find!("^0o[0-7]+"));
-    named!(hex_number, re_bytes_find!("^0x[:xdigit:]+"));
-    named!(binary_number, re_bytes_find!("^0b[01]+"));
-    named!(word_pattern, re_bytes_find!("^[:alpha:][:alnum:]*"));
     named!(float_pattern, re_bytes_find!(r"^(\.[:digit:]+|[:digit:]+(\.[:digit:])?([eE][-+]?[:digit:]+)?)"));
     
+    named!(octal_number, preceded!(tag!("0o"), oct_digit));
+    named!(hex_number, preceded!(tag!("0x"), hex_digit));
+    named!(binary_number, preceded!(tag!("0b"), is_a!("01")));
+    named!(word_pattern, re_bytes_find!("^[:alpha:][:alnum:]*"));
+    /*
+    named!(number_pattern, alt!(
+    	hex_number | octal_number | float_pattern | binary_number
+    ));
+    */
     named!(number_pattern<f64>, alt!(
-        hex_number => { |i| {
-            u32::from_str_radix(&i[2..], 16).unwrap() as f64
-        }}
-        | binary_number => { |i| {
-            u32::from_str_radix(&i[2..], 2).unwrap() as f64
-        }}
-        | octal_number => { |i| {
-            u32::from_str_radix(&i[2..], 8).unwrap() as f64
-        }}
-        | float_pattern => { |i| i.parse().unwrap() }
+        map!(
+        	map_res!(hex_number, apply!(u32::from_str_radix, 16)),
+        	|int| int as f64
+    	)
+        | map!(
+        	map_res!(binary_number, apply!(u32::from_str_radix, 2)),
+        	|int| int as f64
+    	)
+        | map!(
+        	map_res!(octal_number, apply!(u32::from_str_radix, 8)),
+        	|int| int as f64
+    	)
+    	// might not work because it returns a ParseFloatError while
+    	// the rest return a ParseIntError
+        | map_res!(float_pattern, |i| i.parse())
     ));
     
     named!(comment, re_bytes_find!("^#[^\n]*"));
     
-    // Stashed changes:
-    /*
-    //named!(digit, is_a!(b"0123456789"));
-    named!(digit, re_bytes_find!("^[0-9]"));
-    use nom::digit as number;
-    //named!(octal_digit, re_bytes_find!("^[0-7]"));
-    named!(octal_number, re_bytes_find!("^0o[0-7]+"));
-    //named!(hex_digit, re_bytes_find!("^[0-9a-fA-F]"));
-    named!(hex_number, re_bytes_find!("^0x[:xdigit:]+"));
-    named!(binary_number, re_bytes_find!("^0b[01]+"));
-    named!(letter_pattern, re_bytes_find!("^[:alpha:]"));
-    named!(word_pattern, re_bytes_find!("^[:alpha:][:alnum:]*"));
-    //named!(sci_notation, re_bytes_find!("^[eE][+-]?[:digit:]+"));
-    named!(float_pattern, recognize!(alt!(
-        preceded!(tag!("."), number)
-        | re_bytes_find!("^[:digit:]+(\.[:digit:]+)?([eE][+-]?[:digit:]+)?")
-    )));
-    named!(number_pattern, alt!(
-        hex_number | octal_number | float_pattern | binary_number
-    ));
-    */
-    
     /* Helper function: We treat a list as a stack by appending elements to the beginning,
        but this means we have to do a reverse operation to seal the stack at the end. */
-    // XXX: should never run because `Vec`s append elements at the end rather than the
+    // XXX: should never run because vectors append elements at the end rather than the
     // beginning.
     /*
     let cleanup = |l| {
@@ -114,7 +106,7 @@ pub fn tokenize(enclosing_kind: TokenGroupKind, name: CodeSource, mut buf: Strin
 
     /* Individual lines get a more special cleanup so macro processing can occur */
     let complete_line = |l| {
-        if unsafe { options::RUN.step_macro } { 
+        if options::RUN.read().unwrap().step_macro {
             println!("-- Macro processing for {}", name);
         }
         
@@ -145,19 +137,25 @@ pub fn tokenize(enclosing_kind: TokenGroupKind, name: CodeSource, mut buf: Strin
     /* -- Parsers -- */
     
     /* Sub-parser: double-quoted strings. Call after seeing opening quote mark */
-    // FIXME: keep track of newlines for error purposes
+    // double-quoted string. escapes backslashes, double-quotes, and
+    // newlines. must error on unrecognized escape sequence, and on
+    // unexpected eof.
     let quoted_string = closure!(delimited!(
-        char!('"'),
+        tag!("\""),
         map_res!(
-            escaped_transform!(is_not!("\\"), '\\', alt!(
-                char!('\\')  => { |_| b"\\" }
-                | char!('"') => { |_| b"\"" }
-                | char!('n') => { |_| b"\n" }
+            escaped_transform!(is_not!("\\"), '\\', alt_complete!(
+                value!(b"\\", tag!("\\"))
+                | value!(b"\"", tag!("\""))
+                | tap!(_: value!(b"\n", tag!("n")) => {
+                	state_newline();
+            	})
+            	// Error: unrecognized escape sequence
+            	// Error: reached end of file inside string. Missing quote?
                 /* TODO: devour newlines */
             )),
             String::from_utf8
         ),
-        char!('"')
+        tag!("\"")
     ));
     
     // Just in case:
@@ -165,9 +163,6 @@ pub fn tokenize(enclosing_kind: TokenGroupKind, name: CodeSource, mut buf: Strin
     let quoted_string = || {
         /* This parser works by statefully adding chars to a string buffer */
         let mut accum = String::new();
-        
-        /* Helper function adds a sedlex match to the buffer */
-        let add_buf = || accum += Sedlexing.Utf8.lexeme(buf);
         
         /* Operate */
         let proceed = || {
@@ -184,20 +179,16 @@ pub fn tokenize(enclosing_kind: TokenGroupKind, name: CodeSource, mut buf: Strin
             loop {
                 match chars.next() {
                     /* Treat a newline like any other char, but since sedlex doesn't track lines, we have to record it */
-                    Some('\n') => {
+                    Some(c @ '\n') => {
                         state_newline();
-                        add_buf();
+                        accum.push(c);
                     }
                     
                     /* Backslash found, trigger escape handler */
-                    Some('\\') => {
-                        // FIXME: handle unwrap() below.
+                    Some(c @ '\\') => {
+                        // FIXME: handle unwrap()
                         let result = escaped_char(chars.next().unwrap());
-                        
-                        match result {
-                            Ok(s) => accum += s,
-                            Err(e) => return Err(e),
-                        }
+                        accum.push(result?);
                     }
                     
                     /* Unescaped quote found, we are done. Return the data from the buffer. */
@@ -208,7 +199,7 @@ pub fn tokenize(enclosing_kind: TokenGroupKind, name: CodeSource, mut buf: Strin
                         Err(incomplete_fail("Reached end of file inside string. Missing quote?")),
                     
                     /* Any normal character add to the buffer and proceed. */
-                    Some(_) => add_buf(),
+                    Some(c) => accum.push(c)
                 }
             }
             
@@ -240,7 +231,7 @@ pub fn tokenize(enclosing_kind: TokenGroupKind, name: CodeSource, mut buf: Strin
                 return Ok(backtrack());
             }
             /* Comments are allowed after a backslash, and ignored as normal. */
-            '#', Star (Compl '\n') => {},
+            else if buf[..1] == "#" && buf[1..].chars().all(|c| c != '\n') {}
             /* User probably did not intend to concatenate with blank line. */
             eof =>
                 if seen_text {
@@ -399,13 +390,13 @@ pub fn tokenize(enclosing_kind: TokenGroupKind, name: CodeSource, mut buf: Strin
             }
             
             /* Quoted string */
-            | quoted_string => { TokenContents::String }
+            | map!(quoted_string TokenContents::String)
             /*
             '"' => add_to_line_proceed(make_token_here(TokenContents::String(Cow::from(quoted_string()?)))),
             */
             
             /* Floating point number */
-            | number_pattern => { TokenContents::Number }
+            | map!(number_pattern, TokenContents::Number)
             /*
             number_pattern => add_single(|x| 
                 if x.len() < 3 {
@@ -422,7 +413,7 @@ pub fn tokenize(enclosing_kind: TokenGroupKind, name: CodeSource, mut buf: Strin
             
             
             /* Local scope variable */
-            | word_pattern => { |w| TokenContents::Word(Cow::from(w)) },
+            | map!(word_pattern, |w| TokenContents::Word(Cow::from(w))),
 
             /* Line demarcator */
             ';' => new_line_proceed(),
@@ -478,3 +469,58 @@ pub fn snippet(source: CodeSource, st: String) -> Result<CodeSequence, String> {
         Err(e) => panic!("Internal error: Interpreter-internal code is invalid: {}", e),
     }
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+named!(comment, preceded!(tag!("#"), take_until!("\n")));
+
+named!(string, delimited!(
+	tag!("\""),
+	
+	tag!("\"")
+));
+
+named!(string<String>, delimited!(
+	tag!("\""),
+	map_res!(
+		escaped_transform!(is_not!("\\"), '\\', alt!(
+			value!(b"\\", tag!("\\"))
+			| value!(b"\"", tag!("\""))
+			| value!(b"n", tag!("\n"))
+			//| _ -> parseFail "Unrecognized escape sequence"
+		)),
+		String::from_utf8
+	),
+	tag!("\"")
+));
