@@ -5,512 +5,277 @@
    The parts we'd think of a "parser" as usually doing will be handled in a second,
    currently unimplemented, macro-processing step. */
 
-// May as well start from scratch with nom?
-
-use std::io;
-use std::result;
-use std::borrow::Cow;
-
-use nom;
-
-use macros;
-use options;
-// is there a reason not to use ::* ?
-use token::{
-    self,
-    CodeSource,
-    CodePosition,
-    CodeSequence,
-    Token,
-    TokenGroupKind,
-    TokenContents,
-    TokenClosureKind,
-    BoxKind,
-    
-    CompilationError,
-};
-
-pub enum Error {
-    Compilation(token::CompilationError),
-    Failure(String),
-    Io(io::Error),
-}
-
 /* Tokenize uses sedlex which is inherently stateful, so tokenize for a single source string is stateful.
    This is the basic state for a file parse-- it basically just records the position of the last seen newline. */
-
-use std::fmt;
-use token;
-
-#[derive(Clone)]
 struct TokenizeState {
-	line_start: u32,
-	line: u32,
+	line_start: usize,
+	line: usize,
 }
 
 enum GroupCloseToken {
 	Eof,
 	Char(String),
 }
+type GroupCloseRecord = (GroupCloseToken, token::CodePosition);
+//type groupCloseRecord = groupCloseToken*Token.codePosition
+
+let groupCloseHumanReadable kind = match kind with
+    | Eof -> "end of file"
+    | Char s -> "\""^s^"\""
 
 /* Entry point to tokenize, takes a filename and a lexbuf */
 /* TODO: Somehow strip blank lines? */
-pub fn tokenize(enclosing_kind: TokenGroupKind, name: CodeSource, mut buf: String) -> Result<Token, Error> {
+let tokenize enclosingKind name buf : Token.token =
     /* -- Helper regexps -- */
-    named!(float_pattern, re_bytes_find!(r"^(\.[:digit:]+|[:digit:]+(\.[:digit:])?([eE][-+]?[:digit:]+)?)"));
-    
-    named!(octal_number, preceded!(tag!("0o"), oct_digit));
-    named!(hex_number, preceded!(tag!("0x"), hex_digit));
-    named!(binary_number, preceded!(tag!("0b"), is_a!("01")));
-    named!(word_pattern, re_bytes_find!("^[:alpha:][:alnum:]*"));
-    /*
-    named!(number_pattern, alt!(
-    	hex_number | octal_number | float_pattern | binary_number
-    ));
-    */
-    named!(number_pattern<f64>, alt!(
-        map!(
-        	map_res!(hex_number, apply!(u32::from_str_radix, 16)),
-        	|int| int as f64
-    	)
-        | map!(
-        	map_res!(binary_number, apply!(u32::from_str_radix, 2)),
-        	|int| int as f64
-    	)
-        | map!(
-        	map_res!(octal_number, apply!(u32::from_str_radix, 8)),
-        	|int| int as f64
-    	)
-    	// might not work because it returns a ParseFloatError while
-    	// the rest return a ParseIntError
-        | map_res!(float_pattern, |i| i.parse())
-    ));
-    
-    named!(comment, re_bytes_find!("^#[^\n]*"));
-    
+    let digit = [%sedlex.regexp? '0'..'9'] in
+    let number = [%sedlex.regexp? Plus digit] in
+    let octalDigit = [%sedlex.regexp? '0'..'7'] in
+    let octalNumber = [%sedlex.regexp? "0o", Plus octalDigit] in
+    let hexDigit = [%sedlex.regexp? '0'..'9'|'a'..'f'|'A'..'F'] in
+    let hexNumber = [%sedlex.regexp? "0x", Plus hexDigit] in
+    let binaryNumber = [%sedlex.regexp? "0b", Plus ('0'|'1') ] in
+    let letterPattern = [%sedlex.regexp? 'a'..'z'|'A'..'Z'] in /* TODO: should be "alphabetic" */
+    let wordPattern = [%sedlex.regexp? letterPattern, Star ('A'..'Z' | 'a'..'z' | digit) ] in
+    let sciNotation = [%sedlex.regexp? ('e'|'E'), Opt('+'|'-'), number ] in
+    let floatPattern = [%sedlex.regexp? '.',number | number, Opt('.', number), Opt sciNotation] in
+    let numberPattern = [%sedlex.regexp? hexNumber | octalNumber | floatPattern | binaryNumber] in
+
     /* Helper function: We treat a list as a stack by appending elements to the beginning,
        but this means we have to do a reverse operation to seal the stack at the end. */
-    // XXX: should never run because vectors append elements at the end rather than the
-    // beginning.
-    /*
-    let cleanup = |l| {
-        let lt = l.clone();
-        lt.reverse();
-        lt
-    };
-    */
+    let cleanup = List.rev in
 
     /* Individual lines get a more special cleanup so macro processing can occur */
-    let complete_line = |l| {
-        if options::RUN.read().unwrap().step_macro {
-            println!("-- Macro processing for {}", name);
-        }
-        
-        macros::process(l)
-    };
+    let completeLine l =
+        if Options.(run.stepMacro) then print_endline @@ "-- Macro processing for "^(Token.fileNameString name);
+        Macro.process @@ cleanup l in
 
     /* -- State management machinery -- */
     /* Current tokenizer state */
-    let mut state = TokenizeState {
-        line_start: 0,
-        line: 1,
-    };
+    let state = {lineStart=0; line=1} in
     /* Call when the current selected sedlex match is a newline. Mutates tokenizer state. */
-    let state_newline = || {
-        state.line_start = Sedlexing.lexeme_end(buf);
-        state.line += 1;
-    };
-    /* Use tokenizer state to translate sedlex position into a CodePosition */
-    let current_position = || CodePosition {
-        file_name:   name,
-        line_number: state.line,
-        line_offset: Sedlexing.lexeme_end(buf) - state.line_start,
-    };
+    let stateNewline () = state.lineStart <- Sedlexing.lexeme_end buf; state.line <- state.line + 1 in
+    /* Use tokenizer state to translate sedlex position into a codePosition */
+    let currentPosition () = Token.{fileName=name; lineNumber=state.line; lineOffset = Sedlexing.lexeme_end buf-state.lineStart} in
     /* Parse failure. Include current position string. */
-    let parse_fail = |mesg| token::fail_at(&current_position(), mesg);
-    let incomplete_fail = |mesg| token::incomplete_at(&current_position(), mesg);
+    let parseFail mesg = Token.failAt (currentPosition()) mesg in
+    let incompleteFail mesg = Token.incompleteAt (currentPosition()) mesg in
 
     /* -- Parsers -- */
-    
+
     /* Sub-parser: double-quoted strings. Call after seeing opening quote mark */
-    // double-quoted string. escapes backslashes, double-quotes, and
-    // newlines. must error on unrecognized escape sequence, and on
-    // unexpected eof.
-    let quoted_string = closure!(delimited!(
-        tag!("\""),
-        map_res!(
-            escaped_transform!(is_not!("\\"), '\\', alt_complete!(
-                value!(b"\\", tag!("\\"))
-                | value!(b"\"", tag!("\""))
-                | tap!(_: value!(b"\n", tag!("n")) => {
-                	state_newline();
-            	})
-            	// Error: unrecognized escape sequence
-            	// Error: reached end of file inside string. Missing quote?
-                /* TODO: devour newlines */
-            )),
-            String::from_utf8
-        ),
-        tag!("\"")
-    ));
-    
-    // Just in case:
-    /* XXX
-    let quoted_string = || {
+    let rec quotedString () =
         /* This parser works by statefully adding chars to a string buffer */
-        let mut accum = String::new();
-        
+        let accum = Buffer.create 1 in
+        /* Helper function adds a literal string to the buffer */
+        let add = Buffer.add_string accum in
+        /* Helper function adds a sedlex match to the buffer */
+        let addBuf() = add (Sedlexing.Utf8.lexeme buf) in
         /* Operate */
-        let proceed = || {
+        let rec proceed () =
             /* Call after seeing a backslash. Matches one character, returns string escape corresponds to. */
-            let escaped_char = |c| match c {
-                '\\' => Ok("\\"),
-                '"'  => Ok("\""),
-                'n'  => Ok("\n"),
-                _    => Err(parse_fail("Unrecognized escape sequence")) /* TODO: devour newlines */
-            };
-            
+            let escapedChar () =
+                match%sedlex buf with
+                    | '\\' -> "\\"
+                    | '"' -> "\""
+                    | 'n'  -> "\n"
+                    | _ -> parseFail "Unrecognized escape sequence" /* TODO: devour newlines */
             /* Chew through until quoted string ends */
-            let chars = buf.chars();
-            loop {
-                match chars.next() {
-                    /* Treat a newline like any other char, but since sedlex doesn't track lines, we have to record it */
-                    Some(c @ '\n') => {
-                        state_newline();
-                        accum.push(c);
-                    }
-                    
-                    /* Backslash found, trigger escape handler */
-                    Some(c @ '\\') => {
-                        // FIXME: handle unwrap()
-                        let result = escaped_char(chars.next().unwrap());
-                        accum.push(result?);
-                    }
-                    
-                    /* Unescaped quote found, we are done. Return the data from the buffer. */
-                    Some('"') => break,
-                    
-                    /* User probably did not intend for string to run to EOF. */
-                    None =>
-                        Err(incomplete_fail("Reached end of file inside string. Missing quote?")),
-                    
-                    /* Any normal character add to the buffer and proceed. */
-                    Some(c) => accum.push(c)
-                }
-            }
-            
-            Ok(accum)
-        };
-        
-        proceed()
-    };
-    XXX */
+            in match%sedlex buf with
+                /* Treat a newline like any other char, but since sedlex doesn't track lines, we have to record it */
+                | '\n' -> stateNewline(); addBuf(); proceed()
+                /* Backslash found, trigger escape handler */
+                | '\\' -> add (escapedChar()); proceed()
+                /* Unescaped quote found, we are done. Return the data from the buffer. */
+                | '"'  -> Buffer.contents accum
+                /* User probably did not intend for string to run to EOF. */
+                | eof -> incompleteFail "Reached end of file inside string. Missing quote?"
+                /* Any normal character add to the buffer and proceed. */
+                | any  -> add (Sedlexing.Utf8.lexeme buf); proceed()
+                | _ -> parseFail "Internal failure: Reached impossible place"
+        in proceed()
 
     /* Sub-parser: backslash. Eat up to, and possibly including, newline */
-    let escape = |seen_text| {
-        let backtrack = || Sedlexing.backtrack(buf);
-        loop {match buf {
+    in let rec escape seenText =
+        let backtrack() = let _ = Sedlexing.backtrack buf in ()
+        in match%sedlex buf with
             /* Have reached newline. We're done. If no command was issued, eat newline. */
-            if buf.starts_with('\n') {
-                if seen_text {
-                    return Ok(backtrack());
-                } else {
-                    return Ok(state_newline());
-                }
-            }
+            | '\n' -> if seenText then backtrack() else stateNewline()
             /* Skip over white space until newline is reached */
-            else if buf.starts_with(char::is_whitespace) {
-                buf = buf.trim_left();
-            }
+            | white_space -> escape seenText
             /* A second backslash? Okay, back out and let the main loop handle it */
-            else if buf.starts_with('\\') {
-                return Ok(backtrack());
-            }
+            | '\\' -> backtrack()
             /* Comments are allowed after a backslash, and ignored as normal. */
-            else if buf[..1] == "#" && buf[1..].chars().all(|c| c != '\n') {}
+            | '#', Star (Compl '\n') -> escape seenText
             /* User probably did not intend to concatenate with blank line. */
-            eof =>
-                if seen_text {
-                    Ok(backtrack())
-                } else {
-                    Err(incomplete_fail("Found EOF immediately after backslash, expected token or new line."))
-                },
+            | eof -> if seenText then backtrack() else
+                incompleteFail "Found EOF immediately after backslash, expected token or new line."
             /* TODO: Ignore rather than error */
-            any => Err(parse_fail("Did not recognize text after backslash.")),
-            _ => unreachable!()
-        }}
-    };
+            | any -> parseFail "Did not recognize text after backslash."
+            | _ -> parseFail "Internal failure: Reached impossible place"
 
     /* Main loop. */
     /* Takes a constructor that's prepped with all the properties for the enclosing group, and
        needs only the final list of lines to produce a token. Returns a completed group. */
-    
-    //proceed<F>(GroupCloseRecord, F, Vec<Token>, Vec<Vec<Token>>, Vec<Token>) -> Result<Token, Error> where
-    //F: Fn(Vec<Token>, CodeSequence) -> Token {
-    let proceed = |group_close, group_seed, mut group_initializer, mut lines, mut line| {
+    in let rec proceed groupClose (groupSeed : Token.token list -> Token.codeSequence -> Token.token) groupInitializer lines line =
         /* Constructor for a token with the current preserved codeposition. */
-        let make_token_here = |contents| Token::new(current_position(), contents);
+        let makeTokenHere = Token.makeToken (currentPosition()) in
 
         /* Right now all group closers are treated as equivalent. TODO: Don't do it like this. */
-        let close_pattern = closure!(re_bytes_find!(r"^[})\]$]"));
-        
+        let closePattern = [%sedlex.regexp? '}' | ')' | ']' | eof] in
+
         /* Recurse with the same groupSeed we started with. */
-        let proceed_with_initializer = |init, ls, l| {
-            group_initializer = init;
-            lines = ls;
-            line = l;
-        };
-        
+        let proceedWithInitializer = proceed groupClose groupSeed in
+
         /* Recurse with the same groupSeed and initializer we started with. */
-        let proceed_with_lines = |ls, l| {
-            lines = ls;
-            line = l;
-        };
-        
-        /* Recurse with the same groupSeed and lines we started with. */
-        let proceed_with_line = |l| line = l;
+        let proceedWithLines = proceedWithInitializer groupInitializer in
+
+        /* Recurse with the same groupSeed, initializer and lines we started with. */
+        let proceedWithLine =  proceedWithLines lines in
+
+        /* Recurse with all the same arguments we started with. */
+        let skip () = proceedWithLine line in
 
         /* Helper function: Get current sedlex match */
-        let matched_lexemes = || Sedlexing.Utf8.lexeme(buf);
+        let matchedLexemes () = Sedlexing.Utf8.lexeme(buf) in
 
         /* Complete current line & push onto current codeSequence */
-        let lines_plus_line = || {
-            lines.push(line);
-            complete_line(lines)
-        };
+        let linesPlusLine () = completeLine line :: lines in
 
-        /* Recurse with the group_seed and lines we started with, & the argument pushed onto the current line */
-        /* Notice state_new_line and add_to_line_proceed are using different notions of a "line". */
-        let add_to_line_proceed = |x| {line.push(x); line};
+        /* Recurse with the groupSeed and lines we started with, & the argument pushed onto the current line */
+        /* Notice stateNewLine and addToLineProceed are using ndifferent notions of a "line". */
+        let addToLineProceed x = proceedWithLine (x :: line) in
 
-        /* Recurse with the group_seed we started with, the current line pushed onto the CodeSequence, & a new blank line */
-        let new_line_proceed = || proceed_with_lines(lines_plus_line(), vec![]);
+        /* Recurse with the groupSeed we started with, the current line pushed onto the codeSequence, & a new blank line */
+        let newLineProceed x = proceedWithLines (linesPlusLine()) [] in
 
-        /* Complete processing the current group by completing the current CodeSequence & feeding it to the group_seed. */
-        let close_group = || group_seed(group_initializer, lines_plus_line());
+        /* Complete processing the current group by completing the current codeSequence & feeding it to the groupSeed. */
+        let closeGroup () = groupSeed groupInitializer ( cleanup (linesPlusLine()) ) in
 
-        /* Helper: Given a String -> TokenContents mapping, make the token, add it to the line and recurse */
-        let add_single = |constructor| {
-            add_to_line_proceed(make_token_here(constructor(matched_lexemes())))
-        };
-        
+        /* Helper: Given a string->tokenContents mapping, make the token, add it to the line and recurse */
+        let addSingle constructor = addToLineProceed(makeTokenHere(constructor(matchedLexemes()))) in
+
         /* Helper: Function-ized Symbol constructor */
-        let make_symbol = TokenContents::Symbol;
-        
+        let makeSymbol x = Token.Symbol x in
+
         /* Helper: See if lines contains anything substantial */
-        let any_nonblank = |mut x| loop { match *x {
-            [] => return false,
-            [l, ref more..] if l.is_empty() => x = more.to_vec(),
-            _ => return true
-        }};
-        
-        let group_close_make_from = |st| {
-            let ch = match st {
-                "{" => "}",
-                "(" => ")",
-                "[" => "]",
-                _ => return Err(parse_fail("Internal failure: interpreter is confused about parenthesis"))
-            };
-            
-            Ok((GroupCloseToken::Char(ch), current_position()))
-        };
+        let rec anyNonblank = function
+            | [] -> false
+            | []::more -> anyNonblank more
+            | _ -> true
+        in
 
-        let group_close_under_token = || match matched_lexemes() {
-            "" => GroupCloseToken::Eof,
-            s => GroupCloseToken::Char(s),
-        };
+        let groupCloseMakeFrom str =
+            let char = match str with
+                | "{" -> "}"
+                | "(" -> ")"
+                | "[" -> "]"
+                | _ -> parseFail "Internal failure: interpreter is confused about parenthesis"
+            in (Char char, currentPosition())
 
-        /* Recurse with blank code, and a new group_seed described by the arguments */
-        //fn open_group(closure_kind: TokenClosureKind, group_kind: TokenGroupKind) -> Result<Token, Error> {
-        let open_group = |closure_kind, group_kind| {
-            proceed(
-                group_close_make_from(matched_lexemes()),
-                |l, cs| token::make_group(&current_position(), &closure_kind, &group_kind, l, cs),
-                vec![],
-                vec![],
-                vec![]
-            )
-        };
+        in let groupCloseUnderToken () = match matchedLexemes () with | "" -> Eof | s -> Char s
+
+        /* Recurse with blank code, and a new groupSeed described by the arguments */
+        in let rec openGroup closureKind groupKind =
+            proceed (groupCloseMakeFrom @@ matchedLexemes())
+                (Token.makeGroup (currentPosition()) closureKind groupKind) [] [] []
 
         /* Variant assuming non-closure */
-        let open_ordinary_group = |gk| open_group(TokenClosureKind::NonClosure, gk);
-        
-        // TODO: There has to be a better way of doing this.
-        let case = Expr::Class(CharClass::new(vec![
-            ClassRange {begin: '"', end: '#'}, // covers ", #
-            ClassRange {begin: '\\', end: '\\'}, // covers \ 
-            ClassRange {begin: '0', end: '9'}, // covers digit
-            // covers all letters
-            ClassRange {begin: '\u{85}', end: '\u{85}'},
-            ClassRange {begin: '\u{a0}', end: '\u{a0}'},
-            ClassRange {begin: '\u{1680}', end: '\u{1680}'},
-            ClassRange {begin: '\u{2000}', end: '\u{200a}'},
-            ClassRange {begin: '\u{2028}', end: '\u{2029}'},
-            ClassRange {begin: '\u{202f}', end: '\u{202f}'},
-            ClassRange {begin: '\u{205f}', end: '\u{205f}'},
-            ClassRange {begin: '\u{3000}', end: '\u{3000}'},
-        ]));
+        in let openOrdinaryGroup = openGroup Token.NonClosure
 
         /* Now finally here's the actual grammar... */
-        // FIXME: This won't actually work. Must rewrite with nom
-        match buf {
+        in match%sedlex buf with
             /* Ignore comments */
-            ('#', Repeat {
-                e: box AnyCharNoNL,
-                r: Repeater::ZeroOrMore,
-                greedy: true
-            }) => continue,
+            | '#', Star (Compl '\n') -> skip ()
 
             /* On ANY group-close symbol, we end the current group */
-            close_pattern => {
+            | closePattern -> (
                 /* However, we have to check to make sure that the symbol matches */
-                let candidate_close = group_close_under_token();
+                let candidateClose = groupCloseUnderToken() in
                 /* The expected group close comes packed with the position of the opening symbol */
-                let (group_close, group_close_at) = group_close;
+                let groupClose,groupCloseAt = groupClose in
                 /* This is a matching close */
-                if candidate_close == group_close {
-                    Ok(close_group())
-                }
+                if candidateClose = groupClose then closeGroup ()
                 /* This is not a matching close */
-                else {
-                    match candidate_close {
-                        /* No close before EOF: Failure is positioned at the opening symbol */
-                        GroupCloseToken::Eof => Err(token::incomplete_at(group_close_at,
-                            &format!("Did not find matching {} anywhere before end of file. Opening symbol:", group_close))),
-                        /* Close present, but wrong: Failure is positioned at closing symbol */
-                        GroupCloseToken::Char(_) => Err(parse_fail(
-                            format!("Expected closing {} but instead found {}", group_close, candidate_close))
-                        )
-                    }
-                }
-            }
-            
+                else match candidateClose with
+                    /* No close before EOF: Failure is positioned at the opening symbol */
+                    | Eof -> Token.incompleteAt groupCloseAt
+                        ("Did not find matching "^(groupCloseHumanReadable groupClose)^" anywhere before end of file. Opening symbol:")
+                    /* Close present, but wrong: Failure is positioned at closing symbol */
+                    | Char _ -> parseFail @@
+                        "Expected closing "^(groupCloseHumanReadable groupClose)^" but instead found "^(groupCloseHumanReadable candidateClose)
+                )
+
             /* Quoted string */
-            | map!(quoted_string TokenContents::String)
-            /*
-            '"' => add_to_line_proceed(make_token_here(TokenContents::String(Cow::from(quoted_string()?)))),
-            */
-            
-            /* Floating point number */
-            | map!(number_pattern, TokenContents::Number)
-            /*
-            number_pattern => add_single(|x| 
-                if x.len() < 3 {
-                    TokenContents::Number(x.parse().unwrap())
-                } else {
-                    match &x[..2] {
-                        "0b" | "0o" => TokenContents::Number(float_of_int (int_of_string u32::from_str_radix(x)),
-                        "0o" => u32::from_str_radix
-                        _           => TokenContents::Number(float_of_string x)
-                    }
-                }
-            )
-            */
-            
-            
+            | '"' -> addToLineProceed(makeTokenHere(Token.String(quotedString())))
+
+            /* Floating point number
+               More complicated because float_of_string doesn't handle octal or binary */
+            | numberPattern -> addSingle (fun x ->
+                               if (String.length x) < 3 then
+                                 Token.Number(float_of_string x)
+                               else match (String.sub x 0 2) with
+                                      "0b" | "0o" -> Token.Number(float_of_int (int_of_string x))
+                                      | _         -> Token.Number(float_of_string x))
+
+
             /* Local scope variable */
-            | map!(word_pattern, |w| TokenContents::Word(Cow::from(w))),
+            | wordPattern -> addSingle (fun x -> Token.Word x)
 
             /* Line demarcator */
-            ';' => new_line_proceed(),
+            | ';' -> newLineProceed()
 
             /* Line demarcator (but remember, we have to track newlines) */
-            '\n' => {
-                state_newline();
-                new_line_proceed()
-            }
+            | '\n' -> stateNewline(); newLineProceed()
 
             /* Reader instructions.
                TODO: A more general system for reader instructions; allow tab after \version */
-            "\\version 0.1" |
-            "\\version 0.2" |
-            "\\version 0.3b" => { escape(true); continue } /* Ignore to end of line, don't consume */
-            '\\' => { escape(false); continue }           /* Ignore to end of line and consume it */
+            | "\\version 0.1"  -> escape true; skip() /* Ignore to end of line, don't consume */
+            | "\\version 0.2"  -> escape true; skip() /* Ignore to end of line, don't consume */
+            | "\\version 0.3b"  -> escape true; skip() /* Ignore to end of line, don't consume */
+            | '\\' -> escape false; skip()            /* Ignore to end of line and consume it */
 
             /* Ignore whitespace */
-            white_space => continue,
+            | white_space -> skip ()
 
             /* On groups or closures, open a new parser (NO TCO AT THIS TIME) and add its result token to the current line */
-            '(' => add_to_line_proceed(open_ordinary_group(TokenGroupKind::Plain)),
-            '{' => add_to_line_proceed(open_ordinary_group(TokenGroupKind::Scoped)),
-            '[' => add_to_line_proceed(open_ordinary_group(TokenGroupKind::Box(BoxKind::NewObject))),
-            a if a == case => add_single(TokenContents::Symbol),
-            _ => Err(parse_fail("Unexpected character")) /* Probably not possible? */
-		}
-	}
-}
+            | '(' -> addToLineProceed( openOrdinaryGroup Token.Plain )
+            | '{' -> addToLineProceed( openOrdinaryGroup Token.Scoped )
+            | '[' -> addToLineProceed( openOrdinaryGroup @@ Token.Box Token.NewObject )
 
-// groupCloseHumanReadable
-impl fmt::Display for GroupCloseToken {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-    	use self::GroupCloseToken::*;
-        match *self {
-        	Eof         => f.write_str("end of file"),
-        	Char(ref s) => write!(f, "\"{}\"", s),
-        }
-    }
-}
+            /* If a | is seen, this demarcates the initializer */
+            | '|' -> if anyNonblank lines
+                then addSingle makeSymbol /* If we've passed our chance for an initializer, this is just a pipe */
+                else proceedWithInitializer ( /* Otherwise it's an initializer */
+                    if Options.(run.stepMacro) then print_endline @@ "-- Macro processing for initializer in "^(Token.fileNameString name);
+                    Macro.process @@ cleanup line
+                ) lines [] /* Otherwise swap line into the initializer spot */
 
-type GroupCloseRecord = (GroupCloseToken, token::CodePosition);
+            | Plus(Compl(Chars "#()[]{}\\;\""|digit|letterPattern|white_space))
+                -> addSingle makeSymbol
+            | _ -> parseFail "Unexpected character" /* Probably not possible? */
 
-/* Entry point to tokenize, takes a filename and a lexbuf */
-/* TODO: Somehow strip blank lines? */
-fn tokenize(enclosingKind, name, buf) -> token::Token {
-	/* -- Helper regexps -- */
-	
-}
+    /* When first entering the parser, treat the entire program as implicitly being surrounded by parenthesis */
+    in proceed (Eof,currentPosition()) (Token.makeGroup (currentPosition()) Token.NonClosure enclosingKind) [] [] []
 
+/* Tokenize entry point typed to channel */
+let tokenizeChannel source channel =
+    let lexbuf = Sedlexing.Utf8.from_channel channel in
+    tokenize Token.Plain source lexbuf
 
+/* Tokenize entry point typed to string */
+let tokenizeString source str =
+    let lexbuf = Sedlexing.Utf8.from_string str in
+    tokenize Token.Plain source lexbuf
 
+let unwrap token = match token.Token.contents with
+    | Token.Group g -> g.Token.items
+    | _ -> failwith(Printf.sprintf "%s %s" "Internal error: Object in wrong place" (Token.positionString token.Token.at))
 
+let snippet source str =
+    try
+        unwrap @@ tokenizeString source str
+    with
+        Token.CompilationError e -> failwith @@
+            "Internal error: Interpreter-internal code is invalid:" ^
+            (Token.errorString e)
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-named!(comment, preceded!(tag!("#"), take_until!("\n")));
-
-named!(string, delimited!(
-	tag!("\""),
-	
-	tag!("\"")
-));
-
-named!(string<String>, delimited!(
-	tag!("\""),
-	map_res!(
-		escaped_transform!(is_not!("\\"), '\\', alt!(
-			value!(b"\\", tag!("\\"))
-			| value!(b"\"", tag!("\""))
-			| value!(b"n", tag!("\n"))
-			//| _ -> parseFail "Unrecognized escape sequence"
-		)),
-		String::from_utf8
-	),
-	tag!("\"")
-));
