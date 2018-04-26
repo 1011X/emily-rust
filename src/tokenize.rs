@@ -27,31 +27,35 @@ let groupCloseHumanReadable kind = match kind with
 /* TODO: Somehow strip blank lines? */
 let tokenize enclosingKind name buf : Token.token =
     /* -- Helper regexps -- */
-    let digit = [%sedlex.regexp? '0'..'9'] in
-    let number = [%sedlex.regexp? Plus digit] in
-    let octalDigit = [%sedlex.regexp? '0'..'7'] in
-    let octalNumber = [%sedlex.regexp? "0o", Plus octalDigit] in
-    let hexDigit = [%sedlex.regexp? '0'..'9'|'a'..'f'|'A'..'F'] in
-    let hexNumber = [%sedlex.regexp? "0x", Plus hexDigit] in
-    let binaryNumber = [%sedlex.regexp? "0b", Plus ('0'|'1') ] in
-    let letterPattern = [%sedlex.regexp? 'a'..'z'|'A'..'Z'] in /* TODO: should be "alphabetic" */
-    let wordPattern = [%sedlex.regexp? letterPattern, Star ('A'..'Z' | 'a'..'z' | digit) ] in
-    let sciNotation = [%sedlex.regexp? ('e'|'E'), Opt('+'|'-'), number ] in
-    let floatPattern = [%sedlex.regexp? '.',number | number, Opt('.', number), Opt sciNotation] in
-    let numberPattern = [%sedlex.regexp? hexNumber | octalNumber | floatPattern | binaryNumber] in
+    //let digit = [%sedlex.regexp? '0'..'9'] in
+    let number = nom::digit1;
+    let octal_number = closure!(re_find!("^0o[0-7]+"));
+    let hex_number = closure!(re_find!("^0x[[:xdigit:]]+"));
+    let binary_number = closure!(re_find!("^0b[01]+"));
+    let letter_pattern = closure!(re_find!(r"^\w"));
+    //let letterPattern = [%sedlex.regexp? 'a'..'z'|'A'..'Z'] in /* TODO: should be "alphabetic" */
+    let word_pattern = closure!(re_find!(r"^\w[\w\d]*"));
+    let float_pattern = closure!(re_find!("^\.\d+|\d+(?:\.\d+)?(?:[eE][+-]?\d+)?"));
+    let number_pattern = closure!(alt!(
+    	hex_number | octal_number | float_pattern | binary_number
+	));
 
     /* Helper function: We treat a list as a stack by appending elements to the beginning,
        but this means we have to do a reverse operation to seal the stack at the end. */
     let cleanup = List.rev in
 
     /* Individual lines get a more special cleanup so macro processing can occur */
-    let completeLine l =
-        if Options.(run.stepMacro) then print_endline @@ "-- Macro processing for "^(Token.fileNameString name);
-        Macro.process @@ cleanup l in
+    let complete_line = |l| {
+    	if options::RUN.read().unwrap().step_macro {
+    		println!("-- Macro processing for {}", token::file_name_string(name));
+    	}
+    	//macros::process(cleanup(l));
+    	macros::process(l);
+    };
 
     /* -- State management machinery -- */
     /* Current tokenizer state */
-    let state = {lineStart=0; line=1} in
+    let state = TokenState {line_start: 0, line: 1};
     /* Call when the current selected sedlex match is a newline. Mutates tokenizer state. */
     let stateNewline () = state.lineStart <- Sedlexing.lexeme_end buf; state.line <- state.line + 1 in
     /* Use tokenizer state to translate sedlex position into a codePosition */
@@ -155,14 +159,12 @@ let tokenize enclosingKind name buf : Token.token =
         let addSingle constructor = addToLineProceed(makeTokenHere(constructor(matchedLexemes()))) in
 
         /* Helper: Function-ized Symbol constructor */
-        let makeSymbol x = Token.Symbol x in
+        let make_symbol = |x| TokenContents::Symbol(x);
 
         /* Helper: See if lines contains anything substantial */
-        let rec anyNonblank = function
-            | [] -> false
-            | []::more -> anyNonblank more
-            | _ -> true
-        in
+        fn any_nonblank(x: &[]) -> bool {
+        	!x.iter().all(|e| e.is_empty())
+        }
 
         let groupCloseMakeFrom str =
             let char = match str with
@@ -267,10 +269,28 @@ let tokenizeString source str =
     let lexbuf = Sedlexing.Utf8.from_string str in
     tokenize Token.Plain source lexbuf
 
+fn unwrap(token: Token) -> Result<CodeSequence, String> {
+	match token.contents {
+		TokenContents::Group(g) => Ok(g.items),
+		// Should this panic or return Err ?
+		_ => Err(format!("Internal error: Object in wrong place {}", token::position_string(token.at)))
+	}
+}
+/*
 let unwrap token = match token.Token.contents with
     | Token.Group g -> g.Token.items
     | _ -> failwith(Printf.sprintf "%s %s" "Internal error: Object in wrong place" (Token.positionString token.Token.at))
+*/
 
+fn snippet(source, str: String) -> Result<CodeSequence, String> {
+	unwrap(match tokenize_string(source, str) {
+		Ok(r) => r,
+		Err(e) => return Err(format!(
+			"Internal error: Interpreter-internal code is invalid:{}",
+			e
+		)),
+	})
+}
 let snippet source str =
     try
         unwrap @@ tokenizeString source str

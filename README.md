@@ -1,3 +1,5 @@
+**Note**: This is a re-implementation of the Emily programming language in Rust. If you're looking for the original implementation in OCaml, see @mcclure111's [BitBucket repository](https://bitbucket.org/runhello/emily/src).
+
 # Emily programming language, version 0.3b
 
 If you are reading this file on GitHub or BitBucket: Please click the "Wiki" button to the side of the page.
