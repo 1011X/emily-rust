@@ -4,6 +4,8 @@
 use std::env;
 use std::path::PathBuf;
 
+use lazy_static::lazy_static;
+
 /* TODO: This should be normalized. Strongly consider using extunix.realpath instead */
 fn readlink(path: PathBuf) -> PathBuf {
 	path.canonicalize().unwrap()

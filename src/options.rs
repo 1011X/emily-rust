@@ -1,8 +1,6 @@
 /* Parse and validate command line arguments. */
 
-extern crate getopts;
-
-use self::getopts::Options;
+use getopts::Options;
 
 use std::env;
 //use std::io;
@@ -10,6 +8,8 @@ use std::process::exit;
 use std::ffi::OsString;
 use std::path::PathBuf;
 use std::sync::{RwLock, Once, ONCE_INIT};
+
+use lazy_static::lazy_static;
 
 //use arg_plus;
 
