@@ -1,24 +1,20 @@
 #![feature(slice_patterns)]
+#![feature(box_syntax)]
+
 #![allow(dead_code)]
 #![allow(unused_variables)]
 
-#[macro_use]
-extern crate nom;
-#[macro_use]
-extern crate lazy_static;
-#[cfg(feature = "repl")]
-extern crate ctrlc;
-
-mod value;
-//mod value_util;
-mod pretty;
-mod token;
-//mod tokenize;
+//mod macros;
 mod options;
 mod path;
+mod pretty;
+mod token;
 #[cfg(feature = "repl")]
 mod repl;
+//mod tokenize;
+mod value;
+mod value_util;
 
 fn main() {
-	options::init();
+    options::init();
 }

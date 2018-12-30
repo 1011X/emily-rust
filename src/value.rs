@@ -4,15 +4,17 @@ use std::fmt;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 
+use lazy_static::lazy_static;
+
 //use ocaml;
-use token;
-use pretty;
-use options;
+use crate::token;
+use crate::pretty;
+use crate::options;
 
 pub type TableValue = HashMap<Value, Value>;
 
 /* Closure types: */
-#[derive(Clone)]
+#[derive(Clone, Hash)]
 pub struct ClosureExecUser {
     body: token::CodeSequence,
     scoped: bool, /* Should the closure execution get its own let scope? */
@@ -21,30 +23,30 @@ pub struct ClosureExecUser {
     key: Vec<String>, /* Not-yet-curried keys, or [] as special for "this is nullary" -- BACKWARD, first-applied key is last */
     has_return: bool, /* Should the closure execution get its own "return" continuation? */
 }
-/*
-// Can't clone because Fn* types can't clone
-//#[derive(Clone)]
+
+#[derive(Clone, Hash)]
 pub enum ClosureExec {
     User(ClosureExecUser),
-    Builtin(Box<Fn(Vec<Value>) -> Value>)
+    Builtin(fn(Vec<Value>) -> Result<Value, String>)
 }
-*/
-#[derive(Clone)]
+
+#[derive(Clone, Hash)]
 pub enum ClosureThis {
     Blank,             /* Newly born closure */
     Never,             /* Closure is not a method and should not receive a this. */
     Current(Box<Value>, Box<Value>), /* Closure is a method, has a provisional current/this. */
     Frozen(Box<Value>, Box<Value>),  /* Closure is a method, has a final, assigned current/this. */
 }
-/*
+
 /* Is this getting kind of complicated? Should curry be wrapped closures? Should callcc be separate? */
+#[derive(Clone, Hash)]
 pub struct ClosureValue {
-    exec: ClosureExec,
-    need_args: usize,      /* Count this down as more values are added to bound */
-    bound: Vec<Value>,     /* Already-curried values -- BACKWARD, first application last */
-    this: ClosureThis,     /* Tracks the "current" and "this" bindings */
+    pub exec: ClosureExec,
+    pub need_args: usize,   /* Count this down as more values are added to bound */
+    bound: Vec<Value>,      /* Already-curried values -- BACKWARD, first application last */
+    pub this: ClosureThis,  /* Tracks the "current" and "this" bindings */
 }
-*/
+
 #[derive(Clone)]
 pub enum Value {
     /* "Primitive" values */
@@ -60,12 +62,12 @@ pub enum Value {
     BuiltinUnaryMethod(Arc<Fn(Value) -> Value>), /* function self = result */
     BuiltinMethod(Arc<Fn(Value) -> Fn(Value) -> Value>), /* function self argument = result */
     BuiltinHandoff(Arc<Fn(ExecuteContext) -> Fn(ExecuteStack) -> Fn(Value, token::CodePosition) -> Value>), /* Take control of interpreter */
+    */
 
     /* Complex user-created values */
     
     /* Is this getting kind of complicated? Should curry be wrapped closures? Should callcc be separate? */
     Closure(ClosureValue),
-    */
     UserMethod(Box<Value>),
     Table(TableValue),
     Object(TableValue), /* Same as Value::Table but treats 'this' different */
@@ -73,40 +75,45 @@ pub enum Value {
 }
 
 impl Value {
-	pub fn from_atom(v: &str) -> Self {
-		Value::Atom(v.to_string())
-	}
+    pub fn from_atom(v: &str) -> Self {
+        Value::Atom(v.to_string())
+    }
+    
+    pub fn from_table(v: HashMap<Value, Value>) -> Self {
+        Value::Table(v)
+    }
 }
 
-impl<'a> From<&'a str> for Value {
-	fn from(v: &str) -> Self {
-		Value::String(v.to_string())
-	}
+impl From<&str> for Value {
+    fn from(v: &str) -> Self {
+        Value::String(v.to_string())
+    }
 }
 
 impl From<String> for Value {
-	fn from(v: String) -> Self {
-		Value::String(v)
-	}
+    fn from(v: String) -> Self {
+        Value::String(v)
+    }
 }
 
 impl From<f64> for Value {
-	fn from(v: f64) -> Self {
-		Value::Float(v)
-	}
+    fn from(v: f64) -> Self {
+        Value::Float(v)
+    }
 }
 
+// boolCast
 impl From<bool> for Value {
-	fn from(v: bool) -> Self {
-		if v { Value::True } else { Value::Null }
-	}
+    fn from(v: bool) -> Self {
+        if v { Value::True } else { Value::Null }
+    }
 }
 
 // Used for implementing OCaml's equality rules
 // Note: PartialEq probably shouldn't be implemented like this. This is just temporary. Maybe.
 impl PartialEq for Value {
     fn eq(&self, other: &Value) -> bool {
-    	use self::Value::*;
+        use self::Value::*;
         match (self, other) {
             (&Null, &Null) | (&True, &True)
                 => true,
@@ -115,16 +122,16 @@ impl PartialEq for Value {
                 => f1 == f2 || f1.is_nan() && f2.is_nan(),
             
             (&String(ref s1), &String(ref s2))
-            	=> s1 == s2,
-        	
-        	(&Atom(ref s1), &Atom(ref s2))
-        		=> s1 == s2,
-    		
-    		(&Table(ref t1), &Table(ref t2)) |
-    		(&Object(ref t1), &Object(ref t2))
-    			=> t1 == t2,
+                => s1 == s2,
             
-        	_ => false
+            (&Atom(ref s1), &Atom(ref s2))
+                => s1 == s2,
+            
+            (&Table(ref t1), &Table(ref t2)) |
+            (&Object(ref t1), &Object(ref t2))
+                => t1 == t2,
+            
+            _ => false
             //_ => self as *const Value == other as *const Value,
         }
     }
@@ -133,26 +140,27 @@ impl PartialEq for Value {
 impl Eq for Value {}
 
 impl Hash for Value {
-    fn hash<H: Hasher>(&self, hasher: &mut H) {
-    	use std::mem;
+    fn hash<H: Hasher>(&self, state: &mut H) {
         use self::Value::*;
-        mem::discriminant(self).hash(hasher);
-        match *self {
+        std::mem::discriminant(self).hash(state);
+        match self {
             Null | True   => {}
-            Float(f)      => f.to_bits().hash(hasher),
-            String(ref s) => s.hash(hasher),
-            Atom(ref c)   => c.hash(hasher),
+            Float(f)      => f.to_bits().hash(state),
+            String(s) => s.hash(state),
+            Atom(c)   => c.hash(state),
             
-            UserMethod(ref v) => v.hash(hasher),
-            BuiltinFunction(ref f) => f.hash(hasher),
+            BuiltinFunction(f) => f.hash(state),
+            Closure(c) => c.hash(state),
+            UserMethod(v) => v.hash(state),
             
-            Table(ref t) | Object(ref t)
-            	=> (t as *const TableValue).hash(hasher),
+            Table(t) | Object(t)
+                => (t as *const TableValue).hash(state),
         }
     }
 }
 
 impl fmt::Display for Value {
+    // dumpValue v
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let wrapper =
             if options::RUN.read().unwrap().track_objects { pretty::label_wrapper }
@@ -176,16 +184,16 @@ impl fmt::Display for RegisterState {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
             RegisterState::LineStart(ref v, _) =>
-            	//Pretty.dumpValue v
+                //Pretty.dumpValue v
                 write!(f, "LineStart:{}", v),
         
             RegisterState::FirstValue(ref v, _, _) =>
-	            //Pretty.dumpValue v
+                //Pretty.dumpValue v
                 write!(f, "FirstValue:{}", v),
         
             RegisterState::PairValue(ref v1, ref v2, _, _) =>
-            	//Pretty.dumpValue v1
-            	//Pretty.dumpValue v2
+                //Pretty.dumpValue v1
+                //Pretty.dumpValue v2
                 write!(f, "PairValue:{},{}", v1, v2),
         }
     }
@@ -208,7 +216,7 @@ pub struct ExecuteContext {
     float_proto  : Value,
     string_proto : Value,
     atom_proto   : Value,
-    object_proto : Value,
+    pub object_proto : Value,
 }
 
 #[derive(Clone, Copy)]
@@ -277,16 +285,16 @@ pub fn table_set_option(table: &mut TableValue, key: Value, value: Option<Value>
 /*
 //tableSetString
 pub fn table_set_string(table, key, value) {
-	table.insert(Value::Atom(key), value)
+    table.insert(Value::Atom(key), value)
 }
 */
 
 //tableFrom
 impl From<Value> for TableValue {
-	fn from(value: Value) -> Self {
-	    match value {
-		    Value::Table(v) | Value::Object(v) => v,
-		    _ => panic!("Internal error: interpreter accidentally treated a non-object as an object in a place this should have been impossible.")
-	    }
-	}
+    fn from(value: Value) -> Self {
+        match value {
+            Value::Table(v) | Value::Object(v) => v,
+            _ => unreachable!("interpreter accidentally treated a non-object as an object in a place this should have been impossible.")
+        }
+    }
 }
