@@ -1,15 +1,22 @@
 /* This file contains an routine that runs an emily repl off stdin. Once entered, it runs until quit. */
 /* In future, this could possibly be moved into its own standalone executable. */
 
+use std::io::{self, prelude::*};
+use lazy_static::lazy_static;
+
+//use crate::execute;
+//use crate::loader::{self, *};
 use crate::options;
-use crate::loader::{self, *};
+use crate::pretty;
+use crate::token::*;
+//use crate::tokenize;
 use crate::value::*;
 
 /* Predefined Emily code used by the REPL */
 lazy_static! {
-    pub static ref REPL_HELP_STRING: String = options::FULL_VERSION + ", interactive mode\
+    pub static ref REPL_HELP_STRING: String = *options::FULL_VERSION + r#", interactive mode\
     Type "help" for help, "quit" to quit\
-    Type "last" to get the previous line's value";
+    Type "last" to get the previous line's value"#;
 }
 
 /* Check if the string 's' ends with a backslash. */
@@ -41,7 +48,7 @@ pub fn repl(target: Option<ExecutionTarget>) {
     
     /* This function will be run if the user evaluates the symbol `help` */
     scope_table.insert(Value::from_atom("help"), Value::BuiltinUnaryMethod(|_| {
-        println!("{}", REPL_HELP_STRING);
+        println!("{}", *REPL_HELP_STRING);
         // TODO: these
         //raise Sys.Break /* Stop executing code. Is this too aggressive? */
     }));
@@ -52,7 +59,7 @@ pub fn repl(target: Option<ExecutionTarget>) {
     scope_table.insert(Value::from_atom(LAST_KEY_STRING), Value::Null);
     
     /* Next print initial help scroll */
-    println!("{}\n", REPL_HELP_STRING);
+    println!("{}\n", *REPL_HELP_STRING);
     
     /* Then run any files provided by the user as arguments */
     if let Some(t) = target {
@@ -95,14 +102,14 @@ pub fn repl(target: Option<ExecutionTarget>) {
             match tokenize::tokenize_string(CodeSource::Cmdline, &combined_string) {
                 Ok(res) => break Ok(res),
                 /* The program is invalid, but could be valid with more text. Read another line. */
-                Err(CompilationError(token::IncompleteError, _, _)) => continue,
+                Err(CompilationError(TokenFailureKind::IncompleteError, _, _)) => continue,
                 Err(e) => break Err(e)
             }
         };
         
         let buf = match input {
             Ok(buf) => buf,
-            Err(e) => println!("Error parsing:\n{}", token::error_string(e)),
+            Err(e) => println!("Error parsing:\n{}", e),
         };
         
         /* Evaluate program in repl-shared scope */
@@ -112,7 +119,7 @@ pub fn repl(target: Option<ExecutionTarget>) {
         };
         
         /* Store final result for next time */
-        scope_table(Value::from_atom(LAST_KEY_STRING), result);
+        scope_table.insert(Value::from_atom(LAST_KEY_STRING), result);
         
         /* Pretty-print final result */
         println!("{}", pretty::repl_display(result, true));

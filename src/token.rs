@@ -18,13 +18,13 @@ pub enum CodeSource {
 // fileNameString
 impl fmt::Display for CodeSource {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match *self {
+        match self {
             CodeSource::Stdin   => f.write_str("<input>"),
             CodeSource::Cmdline => f.write_str("<commandline>"),
             CodeSource::Unknown => f.write_str("<unknown>"),
             
             CodeSource::Internal(s) => write!(f, "<internal:{}>", s),
-            CodeSource::File(ref s) => write!(f, "'{}'", s.display()),
+            CodeSource::File(s)     => write!(f, "'{}'", s.display()),
         }
     }
 }
@@ -95,9 +95,13 @@ impl Hash for TokenContents {
         use self::TokenContents::*;
         std::mem::discriminant(self).hash(state);
         match *self {
-            Word(ref s) | Symbol(ref s) | String(ref s) | Atom(ref s)
-            => s.hash(state),
+            Word(ref s) |
+            Symbol(ref s) |
+            String(ref s) |
+            Atom(ref s) =>
+                s.hash(state),
             
+            // TODO not this
             Number(f) => f.to_bits().hash(state),
             
             Group(ref tg) => tg.hash(state),
@@ -114,56 +118,22 @@ pub struct Token {
     pub contents: TokenContents,
 }
 
+/* Quick constructor for token */
+pub fn make_token(position: CodePosition, contents: TokenContents) -> Token {
+    Token {at: position, contents}
+}
+
 /* Quick constructor for token, group type */
 pub fn make_group(position: CodePosition, closure: TokenClosureKind, kind: TokenGroupKind, group_initializer: Vec<Token>, items: CodeSequence) -> Token {
-    Token {
-        at: position,
-        contents: TokenContents::Group(TokenGroup {
-            kind,
-            closure,
-            group_initializer,
-            items,
-        }),
-    }
+    make_token(position, TokenContents::Group(TokenGroup {kind, closure, group_initializer, items}))
 }
 
 pub fn clone(token: &Token, contents: &TokenContents) -> Token {
-    Token::new(token.at.clone(), contents.clone())
+    make_token(token.at.clone(), contents.clone())
 }
-/*
+
 pub fn clone_group(token: &Token, closure: &TokenClosureKind, kind: TokenGroupKind, initializer: &[Token], items: &[Vec<Token>]) -> Token {
     make_group(token.at.clone(), closure.clone(), kind, initializer.to_vec(), items.to_vec())
-}
-*/
-impl Token {
-    /* Quick constructor for Token */
-    // makeToken
-    pub fn new(position: CodePosition, contents: TokenContents) -> Self {
-        Token { at: position, contents }
-    }
-    
-    /* Quick constructor for Token, group type */
-    // makeGroup
-    /*
-    pub fn from_group(position: &CodePosition, closure: &TokenClosureKind, kind: &TokenGroupKind, items: &CodeSequence) -> Token {
-        Token {
-            at: position.clone(),
-            contents: TokenContents::Group {
-                kind: kind.clone(),
-                closure: closure.clone(),
-                items: items.clone() 
-            }
-        }
-    }
-    
-    pub fn clone(&self, contents: &TokenContents) -> Token {
-        Self::new(&self.at, contents)
-    }
-    
-    pub fn clone_group(&self, closure: &TokenClosureKind, kind: &TokenGroupKind, items: &CodeSequence) -> Token {
-        Self::from_group(&self.at, closure, kind, items)
-    }
-    */
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]

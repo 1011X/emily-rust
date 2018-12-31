@@ -2,7 +2,7 @@
 
 use std::cmp::Ordering;
 
-use token::{
+use crate::token::{
     CodeSequence,
     Token,
     TokenClosureKind,
@@ -10,13 +10,13 @@ use token::{
     TokenGroup,
     TokenGroupKind,
 };
-use options;
-use value::{
+use crate::options;
+use crate::value::{
     self,
     TableValue,
     Value,
-    //ClosureExec,
-    //ClosureValue,
+    ClosureExec,
+    ClosureValue,
     //RegisterState,
 };
 
@@ -25,8 +25,8 @@ use value::{
 
 /* "Disassemble" a token tree into a human-readable string (specializable) */
 fn dump_code_tree_general(
-	group_printer: fn(&Token, String, String, CodeSequence) -> String,
-	token: &Token)
+    group_printer: fn(&Token, String, String, CodeSequence) -> String,
+    token: &Token)
 -> String
 {
     match token.contents {
@@ -37,11 +37,11 @@ fn dump_code_tree_general(
         TokenContents::Atom(ref x) => format!(".{}", x),
         TokenContents::Number(x) => x.to_string(),
         TokenContents::Group(TokenGroup {
-        	ref kind,
-        	ref closure,
-        	ref items,
-        	..
-    	}) => {
+            ref kind,
+            ref closure,
+            ref items,
+            ..
+        }) => {
             let (l, r) = match kind {
                 TokenGroupKind::Plain => ("(", ")"),
                 TokenGroupKind::Scoped => ("{", "}"),
@@ -64,13 +64,13 @@ fn dump_code_tree_general(
 /* "Disassemble" a token tree into a human-readable string (specialized for looking like code) */
 pub fn dump_code_tree_terse(token: &Token) -> String {
     fn group_printer(token: &Token, l: String, r: String, items: CodeSequence)
-	-> String {
+    -> String {
         l + &items.iter()
             .map(|tokens| tokens.iter()
-		        .map(|t| dump_code_tree_general(group_printer, t))
-		        .collect::<Vec<_>>()
-		        .join(" ")
-	        )
+                .map(|t| dump_code_tree_general(group_printer, t))
+                .collect::<Vec<_>>()
+                .join(" ")
+            )
             .collect::<Vec<_>>()
             .join("; ")
         + &r
@@ -89,10 +89,10 @@ pub fn dump_code_tree_dense(token: &Token) -> String {
     -> String {
         l + "\n" + &items.iter()
             .map(|tokens| tokens.iter()
-		        .map(one_token)
-		        .collect::<Vec<_>>()
-		        .join("\n")
-	        )
+                .map(one_token)
+                .collect::<Vec<_>>()
+                .join("\n")
+            )
             .collect::<Vec<_>>()
             .join("\n")
         + "\n" + &r
@@ -147,9 +147,9 @@ fn id_string_for_value(v: &Value) -> String {
 }
 
 pub fn dump_value_tree_general(
-	wrapper: fn(&'static str, &Value) -> String,
-	v: &Value)
-	-> String
+    wrapper: fn(&'static str, &Value) -> String,
+    v: &Value)
+    -> String
 {
     match *v {
         Value::Null => String::from("<null>"),
@@ -162,15 +162,15 @@ pub fn dump_value_tree_general(
         /*
         Value::BuiltinMethod(_) => Cow::from("<object-builtin>"),
         Value::BuiltinUnaryMethod(_) => Cow::from("<property-builtin>"),
-        Value::Closure(ClosureValue {exec: e, need_args: n}) => {
-            let tag = match e {
+        */
+        Value::Closure(ClosureValue {exec: ref e, need_args: ref n, ..}) => {
+            let tag = match *e {
                 ClosureExec::User(_) => "closure",
                 ClosureExec::Builtin(_) => "closure-builtin",
             };
             
-            Cow::from(format!("<{}/{}>", tag, n))
+            format!("<{}/{}>", tag, n)
         }
-        */
         Value::Table(_) => wrapper("scope", v), /* From the user's perspective, a table is a scope */
         Value::Object(_) => wrapper("object", v),
         //Value::Continuation(_) => Cow::from("<return>"),
@@ -202,7 +202,7 @@ fn dump_value_unwrapped_table(t: &TableValue) -> String {
 }
 
 fn dump_value_table(v: &Value) -> String {
-	let unwrapped = match *v {
+    let unwrapped = match *v {
         Value::Table(ref t) | Value::Object(ref t)
             => dump_value_unwrapped_table(t),
         
@@ -212,11 +212,11 @@ fn dump_value_table(v: &Value) -> String {
 }
 
 pub fn dump_value_new_table(v: &Value) -> String {
-	if options::RUN.read().unwrap().trace_set {
-	    dump_value_table(v)
-	} else {
-	    v.to_string()
-	}
+    if options::RUN.read().unwrap().trace_set {
+        dump_value_table(v)
+    } else {
+        v.to_string()
+    }
 }
 
 /* Normal "print" uses this */
@@ -235,21 +235,21 @@ pub fn dump_value_for_user(v: &Value) -> String {
 
 /* Should the REPL show a key/value pair? if not hide it. */
 fn should_show_item(&&(k, _): &&(&Value, &Value)) -> bool {
-	use super::value::*;
+    use super::value::*;
     [&*PARENT_KEY, &*HAS_KEY, &*SET_KEY, &*LET_KEY].contains(&k)
     
 }
 
 /* Sort items in objects/tables by key name */
 fn sort_items(&(k1, v1): &(&Value, &Value), &(k2, v2): &(&Value, &Value)) -> Ordering {
-	use self::Value::*;
+    use self::Value::*;
     match (k1, k2) {
         (&Atom(ref s1), &Atom(ref s2)) => s1.cmp(&s2),
         (&Atom(_), _) => Ordering::Less,
         (_, &Atom(_)) => Ordering::Greater,
         (&Float(n1), &Float(n2))
-        	=> n1.partial_cmp(&n2)
-        	.unwrap_or(Ordering::Less),
+            => n1.partial_cmp(&n2)
+            .unwrap_or(Ordering::Less),
         _ => Ordering::Equal,
     }
 }
@@ -269,7 +269,7 @@ fn truncate(mut s: String, limit_at: usize, reduce_to: usize, suffix: &str) -> S
         s.truncate(reduce_to);
         s + suffix
     } else {
-    	s
+        s
     }
 }
 
@@ -301,12 +301,12 @@ pub fn repl_display(value: &Value, recurse: bool) -> String {
         Value::String(ref s) => escape_string(s),
         Value::Atom(ref s) => format!(".{}", s),
         Value::Table(ref t) | Value::Object(ref t) =>
-		    if recurse {
-		    	display_table(t)
-			} else {
-				String::from("<object>")
-			}
-		
+            if recurse {
+                display_table(t)
+            } else {
+                String::from("<object>")
+            }
+        
         _ => dump_value_for_user(value)
     }
 }
